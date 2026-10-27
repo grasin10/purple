@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block body %}
+<div class="card"><form method="post" action="/command" class="row">
+<input type="hidden" name="csrf" value="{{ csrf }}">
+<input name="text" placeholder="Ask JARVIS… e.g. /briefing or “show junk leads”" style="flex:1;min-width:200px" required>
+<button>Send</button></form></div>
+<div class="grid">
+<div class="card"><h2>Today</h2><pre>{{ briefing }}</pre></div>
+<div>
+<div class="card"><h2>Drafts awaiting approval ({{ drafts|length }})</h2>
+{% for d in drafts %}<p><a href="/leads/{{ d.lead_id }}">#{{ d.id }} · {{ d.lead.name or 'unknown' }}</a> <span class="muted">{{ d.lead.service_type }}</span></p>{% else %}<p class="muted">None.</p>{% endfor %}</div>
+<div class="card"><h2>Needs your review ({{ review|length }})</h2>
+{% for m in review %}<p>#{{ m.id }} <span class="pill">{{ m.category }}</span> {{ m.body[:90] }}</p>{% else %}<p class="muted">Empty.</p>{% endfor %}
+<a href="/review">Open review queue</a></div>
+<div class="card"><h2>Follow-ups due ({{ due|length }})</h2>
+{% for l in due %}<p><a href="/leads/{{ l.id }}">#{{ l.id }} {{ l.name or 'unknown' }}</a> <span class="muted">{{ l.stage }}</span></p>{% else %}<p class="muted">None due.</p>{% endfor %}</div>
+</div></div>
+<div class="card"><h2>Modules &amp; integrations</h2><table>
+{% for i in integrations %}<tr><td>{{ i.name }}</td><td class="s-{{ i.state }}">{{ i.state.replace('_',' ') }}</td><td class="muted">{{ i.detail }}</td></tr>{% endfor %}
+</table></div>
+<div class="card"><h2>Recent activity</h2><table>
+{% for r in recent %}<tr><td class="muted">{{ r.ts.strftime('%m-%d %H:%M') }}</td><td>{{ r.action }}</td><td>{{ r.target }}</td><td class="{{ r.result }}">{{ r.result }}</td></tr>{% endfor %}
+</table></div>
+{% endblock %}
