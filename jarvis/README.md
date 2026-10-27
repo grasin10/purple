@@ -1,17 +1,17 @@
 # JARVIS — personal business operating system
 
-JARVIS is a private assistant for a **junk removal + home cleaning** business that you control from **Telegram** on your phone and from a **mobile-friendly web dashboard**. Version 0.1 handles leads. It sorts incoming messages, keeps a CRM, drafts replies for your approval, tracks follow-ups and sends you daily briefings. It also keeps an audit log of everything it does.
+JARVIS is a private assistant for a **junk removal + home cleaning** business that you control from **Telegram** on your phone and from a **mobile-friendly web dashboard**. Version 0.2 handles leads and Gmail. It reads your business inbox, sorts incoming messages, keeps a CRM, drafts replies, emails them once you approve, tracks follow-ups and sends you daily briefings. It also keeps an audit log of everything it does.
 
 > It lives in `jarvis/`, separate from the Krypt Trader app in the rest of this repository, and shares no code or data with it.
 
-## What actually works today (v0.1)
+## What actually works today (v0.2)
 
 | Area | Status | Notes |
 |---|---|---|
 | Lead CRM (SQLite, Postgres-ready) | ✅ working, tested | stages, duplicate detection by email/phone, history, search/filter, follow-up dates |
 | Message classifier | ✅ working, tested | rule-based; 7 categories; sensitive/injection/uncertain messages always go to **your review** |
 | Reply drafting | ✅ working, tested | asks only for missing details; a policy guard blocks prices, guarantees, confirmations, insurance claims, discounts and coverage claims |
-| Draft approval | ✅ working | approving a draft **does not send it**, because no outbound channel exists yet. You send it yourself, then mark it sent |
+| Draft approval + sending | ✅ working, tested | `/approve` then `/send` replies in the customer's Gmail thread. Sending is two explicit steps, never done twice, and only marked sent when Gmail returns a message ID. You can also `/edit` a draft first |
 | Telegram bot | ✅ code complete, tested with a fake client | needs your bot token + user ID. Not live-tested: Telegram is unreachable from the build sandbox |
 | Telegram security | ✅ tested | user-ID allowlist, private chats only, rate limit, unauthorized attempts audited |
 | Briefing / evening review | ✅ working | on demand; scheduled once you set a timezone and times |
@@ -19,8 +19,10 @@ JARVIS is a private assistant for a **junk removal + home cleaning** business th
 | Dashboard | ✅ working, tested | password login, signed cookie, CSRF, security headers, command box using the same router as Telegram |
 | Audit log | ✅ working | phone numbers and emails are redacted; searchable in the dashboard |
 | Config validation / health / backup | ✅ working | never prints secrets |
-| Email (Gmail) | ⏳ interface only | Phase 3, needs Google OAuth credentials |
-| Automatic replies | 🚫 not implemented | the flag exists but stays off; nothing can be sent to customers automatically |
+| Gmail inbox sync | ✅ code complete, tested against the real Google client library (offline) | checks every 5 min; skips newsletters, no-reply senders, promotions and social; attaches replies in the same thread to the lead. **Not yet run against your real inbox:** needs your one-time Google sign-in |
+| Your own Gmail replies | ✅ tested | replies you send from the Gmail app are detected, so leads don't show as unanswered |
+| Automatic replies | ✅ built, **off by default** | when enabled: first contact only, confidence ≥ 0.9, no policy notes, business name + service area configured, capped per 24h |
+| SMS / Facebook / Nextdoor messages | ⏳ not connected | paste them with `/inquiry` and reply yourself |
 | Marketing, YouTube, sports, forex | ⏳ not started | `/marketing` says so plainly and does not pretend |
 
 **Nothing is mocked behind your back.** When an integration doesn't exist, JARVIS tells you, and it never says a message was sent unless a provider confirmed it.
@@ -120,8 +122,8 @@ Hi, I need an old couch and a fridge hauled away from my garage in 30301 next we
 
 JARVIS classifies it, creates or updates the lead and shows a draft. Then:
 - `/approve 1`
-- copy the draft to the customer yourself
-- `/sent 1`
+- `/send 1` if Gmail is connected and the lead has an email address
+- otherwise send it yourself, then `/manualsent 1`
 
 Or from the terminal:
 ```bash
@@ -131,6 +133,36 @@ Or from the terminal:
 .venv/bin/jarvis ask /briefing
 ```
 
+### 7. Connect Gmail (one time, about 10 minutes, free)
+
+JARVIS asks Google for exactly two permissions: **read** mail and **send** mail. It can't delete, archive, label or change settings, and it never sees your password.
+
+1. Go to https://console.cloud.google.com and create a project called `JARVIS`.
+2. Open **APIs & Services → Library**, search **Gmail API** and click **Enable**.
+3. Open **Google Auth Platform** (older consoles call it **OAuth consent screen**) and click **Get started**:
+   - App name `JARVIS`, with your email as the support email.
+   - **Audience:** *Internal* if you use Google Workspace, *External* for a regular @gmail.com account.
+4. External accounts only: under **Audience → Test users**, add your own Gmail address.
+5. Under **Clients → Create client**, pick **Desktop app** and click Create, then **Download JSON**. Save the file as `jarvis/secrets/google_client_secret.json`. The `secrets/` folder is git-ignored.
+6. On the computer that runs JARVIS:
+   ```bash
+   .venv/bin/jarvis gmail-auth
+   ```
+   A browser opens. Sign in with your **business** Gmail. Google will warn that the app isn't verified; that's expected for your own private app, so click *Continue* and allow both permissions. The token is saved to `secrets/gmail_token.json` with private file permissions.
+7. Verify (read-only, changes nothing):
+   ```bash
+   .venv/bin/jarvis gmail-check
+   ```
+8. Process your inbox once, or just restart `jarvis bot`, which checks every 5 minutes:
+   ```bash
+   .venv/bin/jarvis gmail-sync
+   ```
+   The first sync looks back 3 days (`GMAIL_LOOKBACK_DAYS`). New leads, sensitive emails and sync errors arrive on Telegram; quiet periods stay quiet.
+
+> **Important, External accounts:** while your Google app is in **Testing** status, Google expires the sign-in after **7 days**. JARVIS then messages you on Telegram that Gmail sync failed, and you rerun `jarvis gmail-auth`. To stop the weekly re-login, go to **Google Auth Platform → Audience** and click **Publish app**. For a private app used only by you, Google shows the "unverified" warning at sign-in, but no review is needed for your own account. Check Google's current policy on the console page. Workspace accounts using *Internal* aren't affected.
+
+To turn on automatic first replies after you've reviewed drafts for a while, set `JARVIS_AUTO_REPLY_ENABLED=true` in `.env` and restart. Every automatic send is logged and reported to you on Telegram.
+
 ### Run the tests
 
 ```bash
@@ -139,7 +171,11 @@ Or from the terminal:
 
 ## Commands
 
-`/briefing` `/evening` `/leads [search]` `/junk` `/cleaning` `/followups` `/unanswered` `/lead <id>` `/stage <id> <STAGE>` `/inquiry <message>` `/drafts` `/draft <id>` `/approve <id>` `/reject <id>` `/sent <id>` `/review` `/resolve <id>` `/status` `/settings` `/marketing` `/help`
+`/briefing` `/evening` `/leads [search]` `/junk` `/cleaning` `/followups` `/unanswered` `/lead <id>` `/stage <id> <STAGE>` `/inquiry <message>` `/drafts` `/draft <id>` `/edit <id> <text>` `/approve <id>` `/reject <id>` `/send <id>` `/manualsent <id>` `/email` `/review` `/resolve <id>` `/status` `/settings` `/marketing` `/help`
+
+- `/send` emails an **approved** draft through Gmail. It replies only to the address the customer wrote from, never to an address mentioned inside a message.
+- If a send fails, the draft is marked FAILED with the error. Check Gmail's Sent folder, then `/approve` + `/send` to retry.
+- Generated drafts are blocked from sending if they contain prices, guarantees, confirmations or similar. Text you write yourself with `/edit` only triggers a warning; it's your call.
 
 Natural language works too, for example "JARVIS, find cleaning leads that haven't received a reply" or "show me which integrations aren't connected".
 
@@ -159,9 +195,10 @@ Instructions found inside customer text are treated as data. A message like "ign
 
 ## Permission model
 
-- **Level 1 (automatic):** classifying, drafting, reports, reminders, and changes to JARVIS's own records. This is everything v0.1 can do.
-- **Level 2 (pre-authorized routine sends):** none enabled. This needs a sending integration plus a tested, explicit opt-in.
-- **Level 3 (explicit approval):** refunds, money, live trades, bets, public posts. None of these can be reached from v0.1.
+- **Level 1 (automatic):** reading Gmail, classifying, drafting, reports, reminders, and changes to JARVIS's own records.
+- **Customer emails:** you approve, then you send (`/approve` + `/send`).
+- **Level 2 (pre-authorized):** routine first replies, only if you set `JARVIS_AUTO_REPLY_ENABLED=true`. It's capped per day and limited to clean, high-confidence first contacts. It's off by default.
+- **Level 3 (explicit approval):** refunds, money, live trades, bets, public posts. None of these can be reached from v0.2. Complaints and refund requests are never drafted, let alone sent.
 
 A Telegram message alone can never authorize a financial transaction.
 
@@ -178,13 +215,15 @@ jarvis/
   briefing.py        morning briefing / evening review
   scheduler.py       daily jobs, run once per day (enforced by the database)
   bot.py             Telegram long polling, auth, rate limits
-  integrations/      telegram.py (Bot API via httpx), email.py (adapter interface), base.py (status registry)
+  email_workflow.py  Gmail sync, owner-reply detection, safe sending, gated auto-reply
+  integrations/      telegram.py (Bot API via httpx), gmail.py (official Gmail API + OAuth),
+                     email.py (parsing, quote stripping, bulk detection), base.py (status registry)
   web/               FastAPI dashboard + templates
   security.py        allowlist + rate limiter
   logging_setup.py   redaction of tokens, emails and phone numbers
 ```
 
-One process runs the bot and the scheduler, and a second process runs the dashboard. Both share the database. There are no paid services.
+One process runs the bot, the scheduler and Gmail polling, and a second process runs the dashboard. Both share the database. There are no paid services.
 
 ## Run as a persistent service
 
@@ -202,13 +241,15 @@ Maintenance:
 - `jarvis backup` writes a SQLite backup and checks its integrity.
 - `jarvis init-db` applies new migrations after an update.
 - `jarvis check-config` validates the configuration after any `.env` change.
+- `jarvis gmail-check` confirms Gmail access. Rerun `jarvis gmail-auth` if Google sign-in expired.
+- **When moving to a server**, copy `secrets/gmail_token.json` over with `scp`. Don't run the browser sign-in on a headless server.
 
 ## Credentials you'll need, and when
 
 | Phase | Credential | Where | Cost |
 |---|---|---|---|
 | 1 (now) | Telegram bot token + your user ID | @BotFather, @userinfobot | free |
-| 3 | Google Cloud OAuth client (Gmail API, `gmail.modify` scope) | console.cloud.google.com → APIs → Gmail API → OAuth consent + Desktop client | free |
+| 3 (now) | Google OAuth Desktop client for the Gmail API (`gmail.readonly` + `gmail.send`) | see "Connect Gmail" above | free |
 | 3 (optional) | LLM API key for nicer drafts (`ANTHROPIC_API_KEY`) | console.anthropic.com | usage-based, roughly a few $/mo at this volume |
 | 4 | Meta app + Facebook **Page** access token (`pages_manage_posts`) | developers.facebook.com, needs app review for publishing | free |
 | 4 | Canva Connect API (OAuth) | canva.com/developers | free tier |
@@ -221,8 +262,8 @@ Maintenance:
 ## Implementation plan
 
 1. ✅ **Foundation:** config, database, migrations, audit log, router, Telegram auth, health/config checks, dashboard
-2. ✅ **Lead system:** CRM, classifier, drafts, follow-ups, review queue, briefings *(this release)*
-3. **Email:** Gmail OAuth adapter (`integrations/email.py` interface already defined), polling ingestion into `ingest_message`, threaded replies linked to leads, approved-draft sending with idempotency keys and provider-confirmed message IDs
+2. ✅ **Lead system:** CRM, classifier, drafts, follow-ups, review queue, briefings
+3. ✅ **Email:** Gmail OAuth, inbox sync, thread linking, owner-reply detection, approve-then-send, gated auto-reply *(this release)*. Still open: follow-up email drafts for leads that went quiet, and receipt/booking email sorting
 4. **Marketing:** content calendar, platform-specific post drafts built from `business.toml`, Canva assets, approval/publishing queue, manual-post packages for Nextdoor and Groups
 5. **YouTube studio:** project folders, IDEA→PUBLISHED pipeline, scripts/storyboards/captions
 6. **Sports research:** odds provider adapter, implied vs. model probability, closing-line tracking, paper mode only
@@ -232,6 +273,6 @@ Maintenance:
 ## Information I still need from you
 
 1. **Business facts** for `config/business.toml`: name, hours, service ZIPs/cities, and any pricing rules you approve, such as minimum charges or how you price by volume.
-2. **Email provider:** Gmail / Google Workspace, Outlook or something else.
-3. **Where leads come from today** (email, Facebook DMs, Nextdoor, phone/text, website form), so ingestion targets the right sources.
+2. **Gmail type:** a regular @gmail.com account or Google Workspace. This decides *External* vs *Internal* in the Gmail setup.
+3. **Where else leads come from** (email, Facebook DMs, Nextdoor, phone/text, website form), so ingestion targets the right sources.
 4. **Later, for Phase 7:** currency pairs, timeframes, broker/data provider, and maximum risk per trade and per day.

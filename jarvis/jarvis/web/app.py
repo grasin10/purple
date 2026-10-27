@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 from pathlib import Path
+from urllib.parse import urlencode
 
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -22,7 +23,9 @@ from ..briefing import build_briefing
 from ..config import BusinessProfile, Settings
 from ..crm import service as crm
 from ..db import Database
+from ..email_workflow import last_sync_status, send_draft
 from ..integrations.base import integration_statuses
+from ..integrations.gmail import GmailApi
 from ..models import AuditLog, Draft, InboundMessage, Lead, LeadStage
 from ..router import Context, handle
 from ..security import RateLimiter
@@ -36,7 +39,7 @@ class NotAuthenticated(Exception):
     pass
 
 
-def create_app(settings: Settings, profile: BusinessProfile, db: Database) -> FastAPI:
+def create_app(settings: Settings, profile: BusinessProfile, db: Database, email: GmailApi | None = None) -> FastAPI:
     if len(settings.dashboard_password) < 12 or len(settings.secret_key) < 32:
         raise RuntimeError("Dashboard requires JARVIS_DASHBOARD_PASSWORD (>=12 chars) and JARVIS_SECRET_KEY (>=32 chars).")
 
@@ -114,7 +117,7 @@ def create_app(settings: Settings, profile: BusinessProfile, db: Database) -> Fa
         with db.session() as s:
             return render(request, "home.html", token,
                           briefing=build_briefing(s, settings),
-                          integrations=integration_statuses(settings),
+                          integrations=integration_statuses(settings, gmail_last_sync=last_sync_status(db)),
                           drafts=crm.pending_drafts(s)[:10],
                           review=crm.review_queue(s)[:10],
                           due=crm.followups_due(s)[:10],
@@ -132,7 +135,8 @@ def create_app(settings: Settings, profile: BusinessProfile, db: Database) -> Fa
             lead = s.get(Lead, lead_id)
             if not lead:
                 raise HTTPException(404)
-            return render(request, "lead.html", token, lead=lead, stages=LeadStage.ALL)
+            return render(request, "lead.html", token, lead=lead, stages=LeadStage.ALL,
+                          gmail=email is not None, flash=request.query_params.get("msg", "")[:500])
 
     @app.post("/leads/{lead_id}/stage")
     def lead_stage(request: Request, lead_id: int, stage: str = Form(...), csrf: str = Form(""), token: str = Depends(current_session)):
@@ -145,22 +149,27 @@ def create_app(settings: Settings, profile: BusinessProfile, db: Database) -> Fa
         return RedirectResponse(f"/leads/{lead_id}", status_code=303)
 
     @app.post("/drafts/{draft_id}/{action}")
-    def draft_action(request: Request, draft_id: int, action: str, csrf: str = Form(""), token: str = Depends(current_session)):
+    def draft_action(request: Request, draft_id: int, action: str, csrf: str = Form(""), body: str = Form(""),
+                     token: str = Depends(current_session)):
         require_csrf(request, token, csrf)
         with db.session() as s:
             draft = s.get(Draft, draft_id)
             if not draft:
                 raise HTTPException(404)
-            if action == "approve":
-                crm.decide_draft(s, draft, True, "dashboard")
-            elif action == "reject":
-                crm.decide_draft(s, draft, False, "dashboard")
-            elif action == "sent":
-                crm.mark_draft_sent_manually(s, draft, "dashboard")
-            else:
-                raise HTTPException(400)
             lead_id = draft.lead_id
-        return RedirectResponse(f"/leads/{lead_id}", status_code=303)
+            if action == "approve":
+                msg = crm.decide_draft(s, draft, True, "dashboard")
+            elif action == "reject":
+                msg = crm.decide_draft(s, draft, False, "dashboard")
+            elif action == "manualsent":
+                msg = crm.mark_draft_sent_manually(s, draft, "dashboard")
+            elif action == "edit":
+                msg = crm.edit_draft(s, draft, body, "dashboard").split("\n", 1)[0]
+            elif action != "send":
+                raise HTTPException(400)
+        if action == "send":
+            msg = send_draft(db, email, draft_id, "dashboard") if email else "Gmail isn't connected - nothing was sent."
+        return RedirectResponse(f"/leads/{lead_id}?" + urlencode({"msg": msg}), status_code=303)
 
     @app.get("/review", response_class=HTMLResponse)
     def review(request: Request, token: str = Depends(current_session)):
@@ -189,7 +198,7 @@ def create_app(settings: Settings, profile: BusinessProfile, db: Database) -> Fa
     def command(request: Request, text: str = Form(...), csrf: str = Form(""), token: str = Depends(current_session)):
         """Same router the Telegram bot uses - one command center."""
         require_csrf(request, token, csrf)
-        ctx = Context(db=db, settings=settings, profile=profile, actor="dashboard")
+        ctx = Context(db=db, settings=settings, profile=profile, actor="dashboard", email=email)
         reply = handle(ctx, text[:4000])
         return render(request, "command.html", token, text=text, reply=reply)
 

@@ -137,3 +137,16 @@ def test_scheduler_runs_once_per_day(db):
 def test_chunk_text():
     parts = chunk_text("line\n" * 2000, limit=100)
     assert all(len(p) <= 100 for p in parts) and "".join(parts) == "line\n" * 2000
+
+
+def test_bot_email_poll_notifies_only_on_news(settings, profile, db):
+    from test_gmail import FakeGmail, gmsg
+    gmail = FakeGmail()
+    bot = Bot(settings, profile, db, FakeTelegram(), email=gmail)
+    bot.maybe_sync_email(now=0)
+    assert bot.client.sent == []                      # nothing new -> silent
+    gmail.add(gmsg("m1", "Need an old couch hauled away from 30301"))
+    bot.maybe_sync_email(now=10)                      # within poll interval -> skipped
+    assert bot.client.sent == []
+    bot.maybe_sync_email(now=10_000)
+    assert len(bot.client.sent) == 1 and "/drafts" in bot.client.sent[0][1]

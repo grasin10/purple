@@ -75,7 +75,8 @@ def cmd_bot(args) -> int:
         return 2
     from .bot import Bot
     from .integrations.telegram import TelegramClient
-    Bot(settings, profile, db, TelegramClient(settings.telegram_bot_token)).run_forever()
+    from .integrations.gmail import make_gmail
+    Bot(settings, profile, db, TelegramClient(settings.telegram_bot_token), email=make_gmail(settings)).run_forever()
     return 0
 
 
@@ -85,7 +86,8 @@ def cmd_web(args) -> int:
     import uvicorn
     from .web.app import create_app
     try:
-        app = create_app(settings, profile, db)
+        from .integrations.gmail import make_gmail
+        app = create_app(settings, profile, db, email=make_gmail(settings))
     except RuntimeError as exc:
         print(f"Cannot start dashboard - {exc}", file=sys.stderr)
         return 2
@@ -98,8 +100,10 @@ def cmd_ask(args) -> int:
     """Run a JARVIS command locally (same router as Telegram)."""
     settings, profile, db = _load()
     db.migrate()
+    from .integrations.gmail import make_gmail
     from .router import Context, handle
-    print(handle(Context(db=db, settings=settings, profile=profile, actor="cli"), " ".join(args.text)))
+    print(handle(Context(db=db, settings=settings, profile=profile, actor="cli", email=make_gmail(settings)),
+                 " ".join(args.text)))
     return 0
 
 
@@ -139,6 +143,54 @@ def cmd_backup(args) -> int:
     return 0 if result == "ok" else 1
 
 
+def cmd_gmail_auth(args) -> int:
+    """Interactive Google sign-in (run on your own computer - it opens a browser)."""
+    settings, _, _ = _load()
+    from .integrations.email import EmailError
+    from .integrations.gmail import run_oauth_flow
+    try:
+        scopes = run_oauth_flow(settings.gmail_client_secrets_file, settings.gmail_token_file)
+    except EmailError as exc:
+        print(f"Gmail authorization failed: {exc}", file=sys.stderr)
+        return 1
+    print("Gmail authorized with: " + ", ".join(x.rsplit("/", 1)[-1] for x in scopes))
+    print(f"Token saved to {settings.gmail_token_file} (keep this file private). Next: jarvis gmail-check")
+    return 0
+
+
+def cmd_gmail_check(args) -> int:
+    settings, _, _ = _load()
+    from .integrations.email import EmailError
+    from .integrations.gmail import make_gmail
+    api = make_gmail(settings)
+    if not api:
+        print("Gmail not authorized - run `jarvis gmail-auth`.", file=sys.stderr)
+        return 1
+    try:
+        print(f"Gmail connected as {api.profile_email()}")
+        n = len(api.list_ids("in:inbox newer_than:1d", 10))
+        print(f"Read access OK ({n} inbox message(s) in the last day, up to 10 checked). Nothing was changed or sent.")
+    except EmailError as exc:
+        print(f"Gmail check FAILED: {exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
+def cmd_gmail_sync(args) -> int:
+    settings, profile, db = _load()
+    db.migrate()
+    from .email_workflow import format_report, sync_gmail
+    from .integrations.gmail import make_gmail
+    api = make_gmail(settings)
+    if not api:
+        print("Gmail not authorized - run `jarvis gmail-auth`.", file=sys.stderr)
+        return 1
+    r = sync_gmail(db, api, settings, profile)
+    print(format_report(r) if r.has_news else "No new customer email.")
+    print(f"fetched={r.fetched} filtered={r.filtered} owner_replies_detected={r.replies_detected} errors={len(r.errors)}")
+    return 1 if r.errors else 0
+
+
 def cmd_gen_secret(args) -> int:
     print(secrets.token_urlsafe(48))
     return 0
@@ -168,6 +220,9 @@ def main(argv: list[str] | None = None) -> int:
     i.add_argument("--id", help="provider message id (for idempotency)")
     i.set_defaults(fn=cmd_ingest)
     sub.add_parser("backup", help="back up the SQLite database").set_defaults(fn=cmd_backup)
+    sub.add_parser("gmail-auth", help="sign in to Gmail (opens a browser)").set_defaults(fn=cmd_gmail_auth)
+    sub.add_parser("gmail-check", help="verify Gmail access (read-only)").set_defaults(fn=cmd_gmail_check)
+    sub.add_parser("gmail-sync", help="process new Gmail messages now").set_defaults(fn=cmd_gmail_sync)
     sub.add_parser("gen-secret", help="print a random value for JARVIS_SECRET_KEY").set_defaults(fn=cmd_gen_secret)
     args = p.parse_args(argv)
     return args.fn(args)

@@ -1,16 +1,16 @@
 """Central JARVIS command router.
 
 Takes already-authorized text from any interface (Telegram, CLI, dashboard)
-and returns a text reply. Every handler is Level 1 (read-only or changes to
-JARVIS's own records). No handler sends anything to customers or external
-platforms - those integrations do not exist yet, and the replies say so.
+and returns a text reply. Handlers are Level 1 (read-only or changes to
+JARVIS's own records), except /send, which emails a customer and only works on
+a draft you already approved - two explicit steps from you.
 """
 from __future__ import annotations
 
 import hashlib
 import re
 from dataclasses import dataclass
-from typing import Callable
+from typing import Callable, Optional
 
 from sqlalchemy.orm import Session
 
@@ -20,6 +20,7 @@ from .config import BusinessProfile, Settings, validate
 from .crm import service as crm
 from .db import Database
 from .integrations.base import integration_statuses
+from .integrations.gmail import GmailApi
 from .models import Draft, InboundMessage, Lead, LeadStage
 
 
@@ -30,6 +31,7 @@ class Context:
     profile: BusinessProfile
     actor: str               # e.g. "telegram:12345"
     message_ref: str = ""    # unique id of the incoming command (for idempotent ingestion)
+    email: Optional[GmailApi] = None   # set when Gmail is authorized
 
 
 HELP = """JARVIS commands
@@ -48,8 +50,11 @@ Business
    (optional first lines: "name: ...", "contact: <email or phone>")
 /drafts - replies waiting for approval
 /draft <id> - show a full draft
+/edit <id> <new text> - rewrite a draft in your own words
 /approve <id> | /reject <id> - decide on a draft
-/sent <id> - record that you sent an approved draft yourself
+/send <id> - email an approved draft to the customer via Gmail
+/manualsent <id> - record that you sent an approved draft yourself
+/email - check Gmail now
 /review - messages that need your judgment
 /resolve <id> - mark a review item handled
 
@@ -218,7 +223,15 @@ def _cmd_draft(ctx, s, args):
 
 def _cmd_approve(ctx, s, args):
     d = _get_draft(s, args)
-    return crm.decide_draft(s, d, True, ctx.actor) if d else "Usage: /approve <id>. Draft not found."
+    if not d:
+        return "Usage: /approve <id>. Draft not found."
+    msg = crm.decide_draft(s, d, True, ctx.actor)
+    if not msg.endswith("NOT sent yet."):
+        return msg
+    if ctx.email and d.lead.email:
+        return f"{msg}\nSend it to {d.lead.email} with /send {d.id}."
+    why = "Gmail isn't connected" if not ctx.email else "this lead has no email address"
+    return f"{msg}\n{why.capitalize()} - send it yourself, then record it with /manualsent {d.id}."
 
 
 def _cmd_reject(ctx, s, args):
@@ -226,9 +239,37 @@ def _cmd_reject(ctx, s, args):
     return crm.decide_draft(s, d, False, ctx.actor) if d else "Usage: /reject <id>. Draft not found."
 
 
-def _cmd_sent(ctx, s, args):
+def _cmd_manualsent(ctx, s, args):
     d = _get_draft(s, args)
-    return crm.mark_draft_sent_manually(s, d, ctx.actor) if d else "Usage: /sent <id>. Draft not found."
+    return crm.mark_draft_sent_manually(s, d, ctx.actor) if d else "Usage: /manualsent <id>. Draft not found."
+
+
+def _cmd_edit(ctx, s, args):
+    m = re.match(r"\s*#?(\d+)\s+(.+)", args, re.S)
+    if not m:
+        return "Usage: /edit <id> <full new reply text>"
+    d = s.get(Draft, int(m.group(1)))
+    return crm.edit_draft(s, d, m.group(2), ctx.actor) if d else "Draft not found."
+
+
+def _cmd_send(ctx, s, args):
+    from .email_workflow import send_draft
+    draft_id = _id_arg(args)
+    if not draft_id:
+        return "Usage: /send <id> (the draft must be approved first)."
+    if not ctx.email:
+        return "Gmail isn't connected, so nothing was sent. Run `jarvis gmail-auth` on your computer (see README)."
+    return send_draft(ctx.db, ctx.email, draft_id, ctx.actor)
+
+
+def _cmd_email(ctx, s, args):
+    from .email_workflow import format_report, last_sync_status, sync_gmail
+    if not ctx.email:
+        return "Gmail isn't connected. Run `jarvis gmail-auth` on your computer (see README 'Connect Gmail')."
+    r = sync_gmail(ctx.db, ctx.email, ctx.settings, ctx.profile)
+    summary = format_report(r) if r.has_news else "No new customer email."
+    return (f"{summary}\nChecked {r.fetched} new message(s), filtered {r.filtered}, "
+            f"detected {r.replies_detected} reply(ies) you sent yourself.\nLast sync: {last_sync_status(ctx.db)}")
 
 
 def _cmd_review(ctx, s, args):
@@ -255,7 +296,8 @@ def _cmd_resolve(ctx, s, args):
 
 def _cmd_status(ctx, s, args):
     lines = ["Integration status:"]
-    for st in integration_statuses(ctx.settings):
+    from .email_workflow import last_sync_status
+    for st in integration_statuses(ctx.settings, gmail_last_sync=last_sync_status(ctx.db)):
         lines.append(f"- {st.name}: {st.state} - {st.detail}")
     lines.append(f"Database schema v{ctx.db.schema_version()}")
     return "\n".join(lines)
@@ -280,12 +322,14 @@ COMMANDS: dict[str, Callable[[Context, Session, str], str]] = {
     "leads": _cmd_leads, "junk": _cmd_junk, "cleaning": _cmd_cleaning, "followups": _cmd_followups,
     "unanswered": _cmd_unanswered, "lead": _cmd_lead, "stage": _cmd_stage, "inquiry": _cmd_inquiry,
     "drafts": _cmd_drafts, "draft": _cmd_draft, "approve": _cmd_approve, "reject": _cmd_reject,
-    "sent": _cmd_sent, "review": _cmd_review, "resolve": _cmd_resolve, "status": _cmd_status,
+    "manualsent": _cmd_manualsent, "edit": _cmd_edit, "send": _cmd_send, "email": _cmd_email,
+    "review": _cmd_review, "resolve": _cmd_resolve, "status": _cmd_status,
     "settings": _cmd_settings, "marketing": _cmd_marketing,
 }
 
 # Natural-language intents, checked in order. Each maps to (command, args).
 NL_INTENTS: list[tuple[re.Pattern, str, str]] = [
+    (re.compile(r"\b(check|sync|new|any)\b.*\b(e-?mails?|inbox|gmail)\b", re.I), "email", ""),
     (re.compile(r"\b(integrations?|connected|health|status)\b", re.I), "status", ""),
     (re.compile(r"\bsettings?|config", re.I), "settings", ""),
     (re.compile(r"\b(evening|end of day|wrap[\s-]?up|summari[sz]e .*today)\b", re.I), "evening", ""),

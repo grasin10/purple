@@ -10,11 +10,11 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
-from sqlalchemy import create_engine, event, text
+from sqlalchemy import create_engine, event, inspect, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 class Base(DeclarativeBase):
@@ -87,4 +87,26 @@ def _migration_1(engine: Engine) -> None:
     Base.metadata.create_all(engine)
 
 
-MIGRATIONS = {1: _migration_1}
+def _add_columns(engine: Engine, table: str, columns: dict[str, str]) -> None:
+    """Portable ADD COLUMN that skips columns create_all already made on fresh databases."""
+    existing = {c["name"] for c in inspect(engine).get_columns(table)}
+    with engine.begin() as conn:
+        for name, ddl in columns.items():
+            if name not in existing:
+                conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}"))
+
+
+def _migration_2(engine: Engine) -> None:
+    """Phase 3: Gmail threading fields and send errors."""
+    _add_columns(engine, "inbound_messages", {
+        "subject": "VARCHAR(500) NOT NULL DEFAULT ''",
+        "thread_id": "VARCHAR(200) NOT NULL DEFAULT ''",
+        "rfc_message_id": "VARCHAR(500) NOT NULL DEFAULT ''",
+    })
+    _add_columns(engine, "drafts", {"send_error": "TEXT NOT NULL DEFAULT ''",
+                                   "edited_by_owner": "BOOLEAN NOT NULL DEFAULT FALSE"})
+    with engine.begin() as conn:
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_inbound_messages_thread_id ON inbound_messages (thread_id)"))
+
+
+MIGRATIONS = {1: _migration_1, 2: _migration_2}

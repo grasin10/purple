@@ -27,6 +27,12 @@ def _since(hours: int) -> dt.datetime:
     return utcnow() - dt.timedelta(hours=hours)
 
 
+def last_sync_status_safe(session: Session) -> str:
+    from .models import KeyValue
+    row = session.get(KeyValue, "gmail.last_sync")
+    return row.value if row else ""
+
+
 def build_briefing(session: Session, settings: Settings) -> str:
     day_ago = _since(24)
     new_leads = list(session.scalars(select(Lead).where(Lead.created_at >= day_ago).order_by(Lead.created_at)))
@@ -60,7 +66,10 @@ def build_briefing(session: Session, settings: Settings) -> str:
     out.append(f"Drafts awaiting your approval: {len(drafts)}")
     out.append(f"Messages needing your review: {len(review)} ({len(sensitive)} sensitive)")
     out.append(f"Failed operations (24h): {failures}")
-    disconnected = [s.name for s in integration_statuses(settings)
+    gmail_sync = last_sync_status_safe(session)
+    if gmail_sync:
+        out.append(f"Gmail: last sync {gmail_sync}")
+    disconnected = [s.name for s in integration_statuses(settings, gmail_last_sync=gmail_sync)
                     if s.state not in (IntegrationState.CONNECTED, IntegrationState.CONFIGURED) and s.phase in ("1", "3")]
     if disconnected:
         out.append("Not connected: " + ", ".join(disconnected))

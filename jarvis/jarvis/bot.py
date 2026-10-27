@@ -8,6 +8,8 @@ from . import audit
 from .briefing import build_briefing, build_evening_review
 from .config import BusinessProfile, Settings
 from .db import Database
+from .email_workflow import format_report, sync_gmail
+from .integrations.gmail import GmailApi
 from .integrations.telegram import TelegramClient, TelegramError
 from .models import KeyValue
 from .router import Context, handle
@@ -21,8 +23,11 @@ UNAUTHORIZED_REPLY = "This is a private assistant. You are not authorized to use
 
 
 class Bot:
-    def __init__(self, settings: Settings, profile: BusinessProfile, db: Database, client: TelegramClient):
+    def __init__(self, settings: Settings, profile: BusinessProfile, db: Database, client: TelegramClient,
+                 email: GmailApi | None = None):
         self.settings = settings
+        self.email = email
+        self._next_email_sync = 0.0
         self.profile = profile
         self.db = db
         self.client = client
@@ -67,7 +72,7 @@ class Bot:
             return reply
 
         ctx = Context(db=self.db, settings=self.settings, profile=self.profile, actor=f"telegram:{user_id}",
-                      message_ref=f"tg:{chat_id}:{msg.get('message_id')}")
+                      message_ref=f"tg:{chat_id}:{msg.get('message_id')}", email=self.email)
         try:
             reply = handle(ctx, text)
         except Exception:
@@ -103,14 +108,31 @@ class Bot:
             text = build_evening_review(s, self.settings)
         self.notify_owner(text)
 
+    def maybe_sync_email(self, now: float | None = None) -> None:
+        """Poll Gmail on its interval and tell the owner only when something needs them."""
+        now = time.monotonic() if now is None else now
+        if not self.email or now < self._next_email_sync:
+            return
+        self._next_email_sync = now + self.settings.gmail_poll_minutes * 60
+        try:
+            report = sync_gmail(self.db, self.email, self.settings, self.profile)
+        except Exception:
+            log.exception("gmail sync crashed")
+            self.notify_owner("Gmail sync crashed - check the JARVIS logs. Leads may not be arriving.")
+            return
+        if report.has_news:
+            self.notify_owner(format_report(report))
+
     def run_forever(self, poll_timeout: int = 30) -> None:
         jobs = configured_jobs(self.settings, self._scheduled_briefing, self._scheduled_evening)
-        log.info("JARVIS bot polling; %d scheduled job(s)", len(jobs))
+        log.info("JARVIS bot polling; %d scheduled job(s); Gmail %s", len(jobs),
+                 f"every {self.settings.gmail_poll_minutes} min" if self.email else "not connected")
         offset = self._load_offset()
         backoff = 1.0
         while True:
             if jobs:
                 run_due_jobs(self.db, jobs, self.settings.timezone)
+            self.maybe_sync_email()
             try:
                 updates = self.client.get_updates(offset, poll_timeout=poll_timeout)
                 backoff = 1.0

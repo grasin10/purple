@@ -53,6 +53,6 @@ def test_dashboard_flow_with_csrf(client):
     r = client.post("/drafts/1/approve", data={"csrf": token}, follow_redirects=False)
     assert r.status_code == 303
     page = client.get("/leads/1").text
-    assert "APPROVED" in page and "Mark sent" in page
+    assert "APPROVED" in page and "I sent it myself" in page
     assert "lead.created" in client.get("/audit").text
     assert client.get("/").headers["X-Frame-Options"] == "DENY"

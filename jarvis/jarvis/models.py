@@ -37,6 +37,7 @@ class ServiceType:
 class DraftStatus:
     PENDING_APPROVAL = "PENDING_APPROVAL"
     APPROVED = "APPROVED"
+    SENDING = "SENDING"    # claimed by a sender; guards against double-sends
     REJECTED = "REJECTED"
     SENT = "SENT"
     FAILED = "FAILED"
@@ -96,6 +97,9 @@ class InboundMessage(Base):
     external_id: Mapped[str] = mapped_column(String(200))
     sender_name: Mapped[str] = mapped_column(String(200), default="")
     sender_contact: Mapped[str] = mapped_column(String(320), default="")
+    subject: Mapped[str] = mapped_column(String(500), default="")
+    thread_id: Mapped[str] = mapped_column(String(200), default="", index=True)
+    rfc_message_id: Mapped[str] = mapped_column(String(500), default="")  # Message-ID header, for In-Reply-To
     body: Mapped[str] = mapped_column(Text, default="")
     category: Mapped[str] = mapped_column(String(50), index=True)
     confidence: Mapped[float] = mapped_column(default=0.0)
@@ -131,6 +135,8 @@ class Draft(Base):
     policy_issues: Mapped[list] = mapped_column(JSON, default=list)
     status: Mapped[str] = mapped_column(String(30), default=DraftStatus.PENDING_APPROVAL, index=True)
     provider_message_id: Mapped[str] = mapped_column(String(200), default="")
+    send_error: Mapped[str] = mapped_column(Text, default="")
+    edited_by_owner: Mapped[bool] = mapped_column(default=False)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow)
     decided_at: Mapped[Optional[dt.datetime]] = mapped_column(DateTime, nullable=True)
 

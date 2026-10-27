@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "jarvis"
-version = "0.1.0"
+version = "0.2.0"
 description = "JARVIS - personal AI business operating system (junk removal + home cleaning first)"
 requires-python = ">=3.10"
 dependencies = [
@@ -16,6 +16,9 @@ dependencies = [
   "itsdangerous>=2.1",
   "python-multipart>=0.0.9",
   "tzdata>=2024.1",
+  "google-api-python-client>=2.100",
+  "google-auth>=2.23",
+  "google-auth-oauthlib>=1.1",
   "tomli>=2.0; python_version < '3.11'",
 ]
 

@@ -73,8 +73,16 @@ class Settings:
     log_level: str = "INFO"
     backup_dir: Path = PROJECT_ROOT / "backups"
     # Email (Gmail OAuth) - file paths only, never passwords.
-    gmail_client_secrets_file: str = ""
-    gmail_token_file: str = ""
+    gmail_client_secrets_file: str = str(PROJECT_ROOT / "secrets" / "google_client_secret.json")
+    gmail_token_file: str = str(PROJECT_ROOT / "secrets" / "gmail_token.json")
+    gmail_poll_minutes: int = 5
+    gmail_lookback_days: int = 3
+    gmail_max_per_sync: int = 50
+    auto_reply_daily_limit: int = 10
+
+    @property
+    def gmail_authorized(self) -> bool:
+        return bool(self.gmail_token_file) and Path(self.gmail_token_file).is_file()
 
     @classmethod
     def from_env(cls, load_env_file: bool = True) -> "Settings":
@@ -100,8 +108,12 @@ class Settings:
             rate_limit_per_minute=int(e("JARVIS_RATE_LIMIT_PER_MINUTE", "20") or 20),
             log_level=e("JARVIS_LOG_LEVEL", "INFO"),
             backup_dir=Path(e("JARVIS_BACKUP_DIR") or PROJECT_ROOT / "backups"),
-            gmail_client_secrets_file=e("GMAIL_CLIENT_SECRETS_FILE", ""),
-            gmail_token_file=e("GMAIL_TOKEN_FILE", ""),
+            gmail_client_secrets_file=e("GMAIL_CLIENT_SECRETS_FILE") or str(PROJECT_ROOT / "secrets" / "google_client_secret.json"),
+            gmail_token_file=e("GMAIL_TOKEN_FILE") or str(PROJECT_ROOT / "secrets" / "gmail_token.json"),
+            gmail_poll_minutes=max(1, int(e("GMAIL_POLL_MINUTES", "5") or 5)),
+            gmail_lookback_days=max(1, int(e("GMAIL_LOOKBACK_DAYS", "3") or 3)),
+            gmail_max_per_sync=max(1, int(e("GMAIL_MAX_PER_SYNC", "50") or 50)),
+            auto_reply_daily_limit=max(0, int(e("JARVIS_AUTO_REPLY_DAILY_LIMIT", "10") or 10)),
         )
 
     def secret_values(self) -> list[str]:
@@ -227,14 +239,22 @@ def validate(settings: Settings, profile: BusinessProfile) -> list[Check]:
             val if val and HHMM_RE.match(val) else ("must be HH:MM" if val else "not set - schedule disabled"),
             required=False,
         ))
-    gmail = bool(settings.gmail_client_secrets_file)
-    checks.append(Check("GMAIL", False, "adapter not implemented yet (Phase 3)" if gmail else "not configured (Phase 3)", required=False))
-    checks.append(Check(
-        "JARVIS_AUTO_REPLY_ENABLED",
-        True,
-        "ENABLED - but no sending integration exists, so nothing is sent" if settings.auto_reply_enabled else "disabled (draft-only mode)",
-        required=False,
-    ))
+    if settings.gmail_authorized:
+        from .integrations.gmail import SCOPES, token_scopes
+        missing_scopes = [x.rsplit("/", 1)[-1] for x in SCOPES if x not in token_scopes(settings.gmail_token_file)]
+        gmail_ok, gmail_detail = not missing_scopes, ("authorized (run `jarvis gmail-check` to verify)" if not missing_scopes
+                                                      else "token missing scopes: " + ", ".join(missing_scopes) + " - rerun `jarvis gmail-auth`")
+    elif Path(settings.gmail_client_secrets_file).is_file():
+        gmail_ok, gmail_detail = False, "OAuth client file found - run `jarvis gmail-auth` to sign in"
+    else:
+        gmail_ok, gmail_detail = False, "not configured - see README 'Connect Gmail'"
+    checks.append(Check("GMAIL", gmail_ok, gmail_detail, required=False))
+    if settings.auto_reply_enabled:
+        auto_detail = (f"ENABLED - routine first replies are sent automatically (max {settings.auto_reply_daily_limit}/day)"
+                       if settings.gmail_authorized else "ENABLED but Gmail is not authorized, so nothing is sent")
+    else:
+        auto_detail = "disabled (draft-first: you approve every reply)"
+    checks.append(Check("JARVIS_AUTO_REPLY_ENABLED", True, auto_detail, required=False))
     missing = profile.missing_fields()
     checks.append(Check(
         "business profile",

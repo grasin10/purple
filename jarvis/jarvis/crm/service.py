@@ -13,7 +13,7 @@ from .. import audit
 from ..classify import Category, Classification, classify
 from ..config import BusinessProfile
 from ..db import utcnow
-from ..drafting import draft_reply, extract_details, merge_details
+from ..drafting import draft_reply, extract_details, merge_details, policy_check
 from ..models import Draft, DraftStatus, InboundMessage, Interaction, Lead, LeadStage, ReviewStatus
 
 EMAIL_RE = re.compile(r"^[\w.+-]+@[\w-]+\.[\w.-]+$")
@@ -47,6 +47,15 @@ def find_open_lead(session: Session, email: str, phone: str) -> Lead | None:
     return session.scalars(stmt).first()
 
 
+def find_thread_lead(session: Session, source: str, thread_id: str) -> Lead | None:
+    """Open lead previously linked to this email thread."""
+    stmt = (select(Lead).join(InboundMessage, InboundMessage.lead_id == Lead.id)
+            .where(InboundMessage.source == source, InboundMessage.thread_id == thread_id,
+                   Lead.stage.in_(LeadStage.OPEN))
+            .order_by(InboundMessage.received_at.desc()))
+    return session.scalars(stmt).first()
+
+
 @dataclass
 class IngestResult:
     inbound: InboundMessage
@@ -60,6 +69,7 @@ class IngestResult:
 
 def ingest_message(session: Session, *, source: str, external_id: str, body: str,
                    sender_name: str = "", sender_contact: str = "", attachments: list | None = None,
+                   subject: str = "", thread_id: str = "", rfc_message_id: str = "",
                    profile: BusinessProfile, followup_hours: int = 24, actor: str = "system") -> IngestResult:
     """Classify an inbound message and route it. Idempotent on (source, external_id)."""
     existing_msg = session.scalars(select(InboundMessage).where(
@@ -70,11 +80,14 @@ def ingest_message(session: Session, *, source: str, external_id: str, body: str
                                                          list(existing_msg.reasons)), lead, duplicate_message=True)
 
     email, phone = normalize_contact(sender_contact)
-    open_lead = find_open_lead(session, email, phone)
-    c = classify(body, has_existing_lead=open_lead is not None)
+    open_lead = find_open_lead(session, email, phone) or (find_thread_lead(session, source, thread_id) if thread_id else None)
+    # The subject often carries the request ("Junk removal quote") while the body is short.
+    text_for_classifier = f"{subject}\n{body}" if subject else body
+    c = classify(text_for_classifier, has_existing_lead=open_lead is not None)
 
     inbound = InboundMessage(source=source, external_id=external_id, sender_name=sender_name[:200],
-                             sender_contact=sender_contact[:320], body=body, category=c.category,
+                             sender_contact=sender_contact[:320], subject=subject[:500], thread_id=thread_id,
+                             rfc_message_id=rfc_message_id[:500], body=body, category=c.category,
                              confidence=c.confidence, reasons=c.reasons,
                              review_status=ReviewStatus.PENDING if c.needs_review else ReviewStatus.NONE)
     session.add(inbound)
@@ -106,9 +119,9 @@ def ingest_message(session: Session, *, source: str, external_id: str, body: str
     inbound.lead_id = lead.id
     session.add(Interaction(lead_id=lead.id, direction="in", channel=source, body=body, provider_message_id=external_id))
     lead.last_inbound_at = now
-    if attachments:
-        lead.attachments = list(lead.attachments or []) + list(attachments)
-    details = merge_details(lead.details, extract_details(body, profile))
+    if attachments and result.merged_into_existing:
+        lead.attachments = list(lead.attachments or []) + [a for a in attachments if a not in (lead.attachments or [])]
+    details = merge_details(lead.details, extract_details(text_for_classifier, profile))
     lead.details = details
     lead.zip_code = lead.zip_code or details.get("zip_code", "")
     lead.location = lead.location or details.get("city", "")
@@ -148,16 +161,32 @@ def set_stage(session: Session, lead: Lead, stage: str, actor: str) -> None:
 
 
 def decide_draft(session: Session, draft: Draft, approve: bool, actor: str) -> str:
-    """Approve or reject a draft. Approval does NOT send - there is no sending integration yet."""
-    if draft.status != DraftStatus.PENDING_APPROVAL:
+    """Approve or reject a draft. Approval never sends; sending is a separate explicit step."""
+    # A FAILED send can be re-approved (after checking Gmail's Sent folder) to retry.
+    if draft.status not in (DraftStatus.PENDING_APPROVAL, DraftStatus.FAILED):
         return f"Draft #{draft.id} is already {draft.status}."
     draft.status = DraftStatus.APPROVED if approve else DraftStatus.REJECTED
     draft.decided_at = utcnow()
     audit.record(session, actor, "draft.approved" if approve else "draft.rejected", f"draft:{draft.id}", lead=draft.lead_id)
     if approve:
-        return (f"Draft #{draft.id} approved. NOT sent: no outbound email/SMS integration is configured yet. "
-                f"Copy it to the customer manually, then mark it sent with /sent {draft.id}.")
+        return f"Draft #{draft.id} approved. NOT sent yet."
     return f"Draft #{draft.id} rejected."
+
+
+def edit_draft(session: Session, draft: Draft, body: str, actor: str) -> str:
+    """Replace a draft's text with the owner's wording; it goes back to pending approval."""
+    if draft.status not in (DraftStatus.PENDING_APPROVAL, DraftStatus.APPROVED, DraftStatus.FAILED):
+        return f"Draft #{draft.id} is {draft.status} and can't be edited."
+    body = body.strip()
+    if not body:
+        return "The new draft text is empty."
+    draft.body = body[:5000]
+    draft.edited_by_owner = True
+    draft.status = DraftStatus.PENDING_APPROVAL
+    audit.record(session, actor, "draft.edited", f"draft:{draft.id}", lead=draft.lead_id)
+    warnings = policy_check(draft.body)
+    note = ("\nHeads up - your text " + "; ".join(warnings) + ". That's your call; it won't be blocked.") if warnings else ""
+    return f"Draft #{draft.id} updated:\n\n{draft.body}\n{note}\nApprove with /approve {draft.id}."
 
 
 def mark_draft_sent_manually(session: Session, draft: Draft, actor: str) -> str:
