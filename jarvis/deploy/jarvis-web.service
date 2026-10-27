@@ -1,0 +1,21 @@
+# systemd unit for the JARVIS dashboard (Linux). Copy to /etc/systemd/system/
+# and adjust User and paths. See README "Run as a persistent service".
+[Unit]
+Description=JARVIS dashboard
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=jarvis
+WorkingDirectory=/opt/jarvis/jarvis
+ExecStart=/opt/jarvis/jarvis/.venv/bin/jarvis web
+Restart=on-failure
+RestartSec=10
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/opt/jarvis/jarvis/data /opt/jarvis/jarvis/backups
+
+[Install]
+WantedBy=multi-user.target

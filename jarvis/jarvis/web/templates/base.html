@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JARVIS{% block title %}{% endblock %}</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--fg:#14171a;--muted:#5f6b76;--line:#e2e6ea;--accent:#2457d6;--ok:#1d7a46;--warn:#a15c00;--bad:#b42318}
+@media (prefers-color-scheme:dark){:root{--bg:#0f1216;--card:#171b21;--fg:#e8ecf0;--muted:#97a3ae;--line:#2a3038;--accent:#7aa2ff;--ok:#5cc98b;--warn:#f0b55a;--bad:#ff7a6e}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+header{position:sticky;top:0;background:var(--card);border-bottom:1px solid var(--line);padding:10px 16px;display:flex;gap:14px;align-items:center;flex-wrap:wrap;z-index:1}
+header b{margin-right:auto}nav a{color:var(--fg);text-decoration:none;margin-right:12px;font-weight:500}nav a:hover{color:var(--accent)}
+main{max-width:1000px;margin:0 auto;padding:16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:14px;overflow-wrap:anywhere}
+h2{font-size:16px;margin:0 0 10px}pre{white-space:pre-wrap;font:13px/1.45 ui-monospace,Menlo,Consolas,monospace;margin:0}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px}
+table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:6px 4px;border-bottom:1px solid var(--line);vertical-align:top}th{color:var(--muted);font-weight:500;font-size:13px}
+.muted{color:var(--muted)}.pill{display:inline-block;padding:1px 8px;border-radius:99px;border:1px solid var(--line);font-size:12px}
+.s-connected,.s-configured{color:var(--ok)}.s-not_configured,.s-not_implemented{color:var(--muted)}.s-error,.failed,.denied{color:var(--bad)}
+input,select,button,textarea{font:inherit;padding:8px 10px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--fg);max-width:100%}
+button{background:var(--accent);color:#fff;border:0;cursor:pointer}button.secondary{background:transparent;color:var(--fg);border:1px solid var(--line)}
+form.inline{display:inline}.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+textarea{width:100%;min-height:70px}a{color:var(--accent)}
+</style>
+</head>
+<body>
+<header><b>JARVIS · {{ business }}</b>
+<nav><a href="/">Home</a><a href="/leads">Leads</a><a href="/review">Review</a><a href="/audit">Activity</a></nav>
+<form class="inline" method="post" action="/logout"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="secondary">Log out</button></form>
+</header>
+<main>{% block body %}{% endblock %}</main>
+</body>
+</html>

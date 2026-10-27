@@ -1,0 +1,7 @@
+{% extends "base.html" %}
+{% block body %}
+<div class="card"><form class="row"><input name="q" value="{{ q }}" placeholder="Search action, target, actor"><button>Search</button></form></div>
+<div class="card"><table><tr><th>When (UTC)</th><th>Actor</th><th>Action</th><th>Target</th><th>Result</th></tr>
+{% for r in rows %}<tr><td class="muted">{{ r.ts.strftime('%Y-%m-%d %H:%M:%S') }}</td><td>{{ r.actor }}</td><td>{{ r.action }}</td><td>{{ r.target }}</td><td class="{{ r.result }}">{{ r.result }}</td></tr>{% endfor %}
+</table></div>
+{% endblock %}

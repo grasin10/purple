@@ -1,0 +1,2 @@
+# Nightly SQLite backup at 02:15 (crontab -e). Keeps 14 days.
+15 2 * * * cd /opt/jarvis/jarvis && .venv/bin/jarvis backup && find backups -name 'jarvis-*.db' -mtime +14 -delete

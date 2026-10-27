@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block body %}
+<div class="card"><form class="row" method="get">
+<input name="q" value="{{ q }}" placeholder="Search name, contact, ZIP, text">
+<select name="service"><option value="">All services</option>
+<option value="junk_removal" {% if service=='junk_removal' %}selected{% endif %}>Junk removal</option>
+<option value="home_cleaning" {% if service=='home_cleaning' %}selected{% endif %}>Home cleaning</option></select>
+<select name="stage"><option value="">All stages</option>{% for s in stages %}<option {% if s==stage %}selected{% endif %}>{{ s }}</option>{% endfor %}</select>
+<button>Filter</button></form></div>
+<div class="card"><table><tr><th>#</th><th>Customer</th><th>Service</th><th>Where</th><th>Stage</th><th>Created</th></tr>
+{% for l in leads %}<tr><td><a href="/leads/{{ l.id }}">{{ l.id }}</a></td><td>{{ l.name or l.email or l.phone or 'unknown' }}{% if l.awaiting_reply %} <span class="pill">awaiting reply</span>{% endif %}</td>
+<td>{{ l.service_type.replace('_',' ') }}</td><td>{{ l.zip_code or l.location }}</td><td>{{ l.stage }}</td><td class="muted">{{ l.created_at.strftime('%Y-%m-%d') }}</td></tr>
+{% else %}<tr><td colspan="6" class="muted">No leads match.</td></tr>{% endfor %}</table></div>
+{% endblock %}

@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block body %}
+<div class="card"><h2>Messages needing your judgment ({{ items|length }})</h2>
+<p class="muted">JARVIS never replies to these automatically.</p>
+{% for m in items %}<div class="card"><span class="pill">{{ m.category }}</span> <span class="muted">#{{ m.id }} via {{ m.source }} · {{ m.received_at.strftime('%m-%d %H:%M') }}{% if m.lead_id %} · <a href="/leads/{{ m.lead_id }}">lead #{{ m.lead_id }}</a>{% endif %}</span>
+<pre>{{ m.body }}</pre><p class="muted">Why: {{ m.reasons|join('; ') }}</p>
+<form method="post" action="/review/{{ m.id }}/resolve"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="secondary">Mark handled</button></form></div>
+{% else %}<p class="muted">Nothing waiting.</p>{% endfor %}</div>
+{% endblock %}

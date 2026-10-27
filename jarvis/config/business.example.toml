@@ -1,0 +1,29 @@
+# JARVIS business profile - copy to config/business.toml and fill in YOUR real details.
+# JARVIS never invents business facts: anything left blank is treated as unknown,
+# and drafts will not mention it.
+
+[business]
+name = ""          # e.g. "Acme Junk & Clean" - used to sign customer replies
+phone = ""         # public business phone (optional)
+email = ""         # public business email (optional)
+website = ""
+hours = ""         # e.g. "Mon-Sat 8am-6pm"
+brand_voice = ""   # e.g. "friendly, straightforward, local"
+
+[services]
+enabled = ["junk_removal", "home_cleaning"]
+
+[service_area]
+# Leads outside these ZIPs/cities are flagged for your review (never refused automatically).
+zips = []          # e.g. ["30301", "30302"]
+cities = []        # e.g. ["atlanta", "decatur"]
+
+# Approved pricing rules. Until approved_rules is filled in, every quote needs
+# your approval and drafts never mention a price.
+[pricing.junk_removal]
+approved_rules = []
+notes = ""
+
+[pricing.home_cleaning]
+approved_rules = []
+notes = ""

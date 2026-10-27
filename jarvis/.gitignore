@@ -1,0 +1,8 @@
+.venv/
+data/
+backups/
+logs/
+.env
+config/business.toml
+secrets/
+*.egg-info/
