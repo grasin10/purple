@@ -182,7 +182,12 @@ function PositionRow({ p }: { p: BotPosition }) {
         </span>
       </td>
       <td><TickerLink ticker={p.ticker} eventTicker={p.eventTicker} env={p.kalshiEnv} /></td>
-      <td className="max-w-[280px] truncate text-xs text-krypt-muted">{p.title}</td>
+      <td className="max-w-[280px] text-xs text-krypt-muted">
+        <div className="truncate">{p.title}</div>
+        {p.error && (
+          <div className="truncate text-[10px] text-krypt-loss" title={p.error}>{p.error}</div>
+        )}
+      </td>
       <td>
         <span
           className={cls(

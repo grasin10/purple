@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 import db
+from categorize import is_combo_market
 from kalshi_api import (
     KalshiAPIError, cancel_order, fetch_market, get_balance,
     get_fills_for_order, get_order, get_orderbook, get_positions,
@@ -145,6 +146,9 @@ def _compute_edge(signal: dict, source: str) -> float:
 
 
 def should_trade(signal: dict, source: str, cfg: dict) -> tuple[bool, str]:
+    if is_combo_market(signal.get("ticker", "")):
+        return False, "combo/parlay market (Kalshi rejects these orders)"
+
     # "Secret Strategy" — pure gambling. Ignore every gate (confidence, edge,
     # category, price); each fresh signal just gets a flat random roll.
     if cfg.get("gambling_mode"):
