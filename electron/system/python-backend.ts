@@ -46,6 +46,7 @@ class PythonBackend {
     this.startChild();
   }
 
+  /** Stops the current child and resolves once it has exited (or been killed). */
   async stop(): Promise<void> {
     this.requestedStop = true;
     if (this.restartTimer) {
@@ -61,20 +62,36 @@ class PythonBackend {
       this.send({ type: 'rpc', id: this.id(), method: 'shutdown', params: {} });
     } catch {
     }
-    setTimeout(() => {
-      if (this.child && !this.child.killed) {
+    // Wait for *this* child to go away. Killing via `this.child` instead would
+    // hit whichever child is current by then, and a restart could leave the
+    // old engine running beside the new one.
+    await new Promise<void>((resolve) => {
+      if (c.exitCode !== null || c.signalCode !== null) {
+        resolve();
+        return;
+      }
+      const timer = setTimeout(() => {
         try {
-          this.child.kill('SIGTERM');
+          c.kill('SIGTERM');
         } catch {
         }
-      }
-    }, 1500);
+        resolve();
+      }, 1500);
+      c.once('exit', () => {
+        clearTimeout(timer);
+        resolve();
+      });
+    });
+    if (this.child === c) {
+      this.child = null;
+      this.setStatus('stopped');
+    }
   }
 
   async restart(): Promise<void> {
     this.setStatus('restarting');
     await this.stop();
-    setTimeout(() => this.start(), 1500);
+    await this.start();
   }
 
   info(): BackendInfo {
@@ -248,13 +265,21 @@ class PythonBackend {
 
     child.stdout.setEncoding('utf-8');
     child.stderr.setEncoding('utf-8');
-    child.stdout.on('data', (chunk: string) => this.onStdout(chunk));
-    child.stderr.on('data', (chunk: string) => this.onStderr(chunk));
+    // Ignore anything from a child that has since been replaced, so a stopping
+    // engine can neither feed stale events to the UI nor clobber its successor.
+    child.stdout.on('data', (chunk: string) => {
+      if (this.child === child) this.onStdout(chunk);
+    });
+    child.stderr.on('data', (chunk: string) => {
+      if (this.child === child) this.onStderr(chunk);
+    });
     child.on('error', (err) => {
+      if (this.child !== child) return;
       this.lastError = `child error: ${err.message}`;
       this.pythonOk = false;
     });
     child.on('exit', (code, signal) => {
+      if (this.child !== child) return;
       this.child = null;
       if (this.requestedStop) {
         this.setStatus('stopped');
