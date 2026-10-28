@@ -107,6 +107,15 @@ MICRO_MARKET_FILTERS = [
 ]
 
 
+# Kalshi multivariate "combo" (parlay) markets. Every live order the bot
+# placed on these was rejected, so they're never traded.
+COMBO_MARKET_PREFIXES = ("KXMVE",)
+
+
+def is_combo_market(ticker: str) -> bool:
+    return (ticker or "").upper().startswith(COMBO_MARKET_PREFIXES)
+
+
 def is_micro_market(ticker: str) -> bool:
     upper = (ticker or "").upper()
     return any(upper.startswith(f) for f in MICRO_MARKET_FILTERS)

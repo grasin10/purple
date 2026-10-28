@@ -117,6 +117,16 @@ def test_should_trade_per_source_whale_category_blocks(cfg):
     assert ok is False and "whale set" in reason
 
 
+def test_should_trade_skips_combo_markets_even_in_gambling_mode(cfg):
+    sig = {"ticker": "KXMVECROSSCATEGORY-S2026ABC-XYZ", "price": 0.6,
+           "confidence": 90.0, "taker_side": "yes", "category": "crypto"}
+    ok, reason = trader.should_trade(sig, "whale", cfg)
+    assert not ok and "combo" in reason
+    cfg["gambling_mode"] = True
+    ok, _ = trader.should_trade(sig, "whale", cfg)
+    assert not ok
+
+
 def test_gambling_mode_hits_on_low_roll(cfg, monkeypatch):
     cfg["gambling_mode"] = True
     monkeypatch.setattr(trader.random, "random", lambda: 0.05)  # < 0.10

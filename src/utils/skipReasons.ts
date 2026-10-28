@@ -6,7 +6,7 @@ const MIN_BALANCE_USD = 5;
 const MIN_ORDER_USD = 1;
 
 export type SkipKind =
-  | 'agent-off' | 'confidence' | 'edge' | 'signal-type' | 'category' | 'price'
+  | 'combo' | 'agent-off' | 'confidence' | 'edge' | 'signal-type' | 'category' | 'price'
   | 'gambling' | 'passed';
 
 export interface SkipReason {
@@ -15,6 +15,7 @@ export interface SkipReason {
 }
 
 export const SKIP_KIND_LABEL: Record<SkipKind, string> = {
+  combo: 'Combo / parlay market',
   'agent-off': 'Agent switched off',
   confidence: 'Confidence too low',
   edge: 'Expected edge too small',
@@ -26,6 +27,7 @@ export const SKIP_KIND_LABEL: Record<SkipKind, string> = {
 };
 
 export const SKIP_KIND_FIX: Record<SkipKind, string> = {
+  combo: 'Nothing to change: Kalshi rejects bot orders on combo markets, so they are always skipped.',
   'agent-off': 'Turn this agent on in Settings (trade whales / trade momentum).',
   confidence: 'Lower the minimum confidence in Settings, or wait for stronger signals.',
   edge: 'Lower the minimum edge in Settings, or wait for better-priced signals.',
@@ -42,6 +44,7 @@ export const SKIP_KIND_FIX: Record<SkipKind, string> = {
  * Mirrors should_trade() in python/trader.py; keep the two in sync.
  */
 export function skipReason(s: SignalRow, cfg: TraderConfig): SkipReason {
+  if (isComboMarket(s.ticker)) return { kind: 'combo', text: 'combo/parlay market' };
   if (cfg.gamblingMode) return { kind: 'gambling', text: 'random roll missed' };
 
   const conf = s.confidence;
@@ -83,6 +86,11 @@ export function skipReason(s: SignalRow, cfg: TraderConfig): SkipReason {
     return { kind: 'price', text: `price ${s.priceCents}¢, max ${cfg.maxEntryPriceCents}¢` };
   }
   return { kind: 'passed', text: 'passed your rules, not placed' };
+}
+
+/** Mirrors is_combo_market() in python/categorize.py. */
+export function isComboMarket(ticker: string): boolean {
+  return (ticker || '').toUpperCase().startsWith('KXMVE');
 }
 
 function categoryBlock(cat: string, allowed: string[] | null): string | null {

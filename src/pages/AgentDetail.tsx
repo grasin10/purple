@@ -99,6 +99,9 @@ function ScannerActivity({ agent: a }: { agent: AgentView }) {
   const env = config?.kalshiEnv ?? 'demo';
   const feed = signals.filter((s) => s.source === a.id).slice(0, FEED_LIMIT);
   const blockers = globalBlockers(config, account);
+  const failed = positions
+    .filter((pos) => pos.signalSource === a.id && pos.kalshiEnv === env && pos.status === 'error')
+    .slice(0, 5);
   const mine = positions.filter((p) => p.kalshiEnv === env && p.signalSource === a.id);
   const open = mine.filter(isOpen);
   const results = mine.filter((p) => p.resolved && p.status !== 'dry_run').slice(0, 15);
@@ -109,7 +112,7 @@ function ScannerActivity({ agent: a }: { agent: AgentView }) {
 
   return (
     <>
-      {config && <WhyNoBets feed={feed} cfg={config} blockers={blockers} />}
+      {config && <WhyNoBets feed={feed} cfg={config} blockers={blockers} failed={failed} />}
 
       <div className="mt-4 grid gap-4 lg:grid-cols-2">
         <Section icon={Radio} title="Live feed" hint="signals it found">
@@ -313,10 +316,10 @@ function LogSection({ logs }: { logs: LogEntry[] }) {
 
 /** Plain-language summary of why recent signals did not become bets. */
 function WhyNoBets({
-  feed, cfg, blockers,
-}: { feed: SignalRow[]; cfg: TraderConfig; blockers: string[] }) {
+  feed, cfg, blockers, failed,
+}: { feed: SignalRow[]; cfg: TraderConfig; blockers: string[]; failed: BotPosition[] }) {
   const skipped = feed.filter((s) => !s.traded);
-  if (skipped.length === 0 && blockers.length === 0) return null;
+  if (skipped.length === 0 && blockers.length === 0 && failed.length === 0) return null;
 
   const counts = new Map<SkipKind, number>();
   for (const s of skipped) {
@@ -341,6 +344,19 @@ function WhyNoBets({
               >
                 <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                 <span>{b}</span>
+              </div>
+            ))}
+          </div>
+        )}
+        {failed.length > 0 && (
+          <div className="mb-3 rounded-lg border border-krypt-loss/30 bg-krypt-loss/5 p-2 text-xs">
+            <div className="mb-1 font-medium text-krypt-loss">
+              Kalshi rejected {failed.length} order{failed.length === 1 ? '' : 's'} (no money was spent)
+            </div>
+            {failed.map((p) => (
+              <div key={p.id} className="truncate text-krypt-muted" title={p.error ?? ''}>
+                <span className="text-white/80">{fmtRelative(p.createdAt)}</span> · {p.ticker}:{' '}
+                <span className="text-krypt-loss">{p.error ?? 'unknown error'}</span>
               </div>
             ))}
           </div>
