@@ -6,6 +6,7 @@ import { AppStateProvider, useApp } from './state/AppStateProvider';
 import { ToastProvider } from './state/ToastProvider';
 import { OnboardingModal } from './pages/Onboarding';
 import { DashboardPage } from './pages/Dashboard';
+import { AgentsPage } from './pages/Agents';
 import { StrategiesPage } from './pages/Strategies';
 import { SettingsPage } from './pages/Settings';
 import { PositionsPage } from './pages/Positions';
@@ -20,7 +21,7 @@ import { VisualizerPage } from './pages/Visualizer';
 import { Crypto15mPage } from './pages/Crypto15m';
 
 export type PageId =
-  | 'dashboard' | 'strategies' | 'positions' | 'signals' | 'history'
+  | 'dashboard' | 'agents' | 'strategies' | 'positions' | 'signals' | 'history'
   | 'profiles' | 'settings' | 'api' | 'logs' | 'guide' | 'about'
   | 'visualizer' | 'crypto15m';
 
@@ -65,6 +66,7 @@ function Shell() {
 function PageRouter({ page, setPage }: { page: PageId; setPage: (p: PageId) => void }) {
   switch (page) {
     case 'dashboard': return <DashboardPage onNav={setPage} />;
+    case 'agents': return <AgentsPage onNav={setPage} />;
     case 'strategies': return <StrategiesPage />;
     case 'positions': return <PositionsPage />;
     case 'signals': return <SignalsPage />;
