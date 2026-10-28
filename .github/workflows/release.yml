@@ -29,6 +29,11 @@ jobs:
 
       - name: Build Windows installer
         run: npm run dist
+        env:
+          # The build scripts call the `py -3` launcher, which otherwise picks the
+          # runner's newest Python; pin it to 3.11 so PyInstaller has wheels.
+          PY_PYTHON: '3.11'
+          PY_PYTHON3: '3.11'
 
       - name: Pick release tag
         id: tag
