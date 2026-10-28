@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
-  Activity, ArrowRight, Bitcoin, Cpu, Fish, FlaskConical, TrendingUp,
+  Activity, ArrowRight, Bitcoin, ChevronRight, Cpu, Fish, FlaskConical, TrendingUp,
 } from 'lucide-react';
 import { Bar, BarChart, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import type { BotPosition, Crypto15mStatus, SignalSource } from '@shared/types';
@@ -8,13 +8,14 @@ import { useApp } from '../state/AppStateProvider';
 import { Card, Empty, Page, StatCard } from '../components/common';
 import { cls, fmtNum, fmtRelative, fmtUsd, titleCase } from '../utils/format';
 import type { PageId } from '../App';
+import { AgentDetail } from './AgentDetail';
 
 const C15_POLL_MS = 15000;
 const DAY_MS = 24 * 3600 * 1000;
 
-type AgentState = 'active' | 'watching' | 'off' | 'error';
+export type AgentState = 'active' | 'watching' | 'off' | 'error';
 
-interface AgentView {
+export interface AgentView {
   id: string;
   name: string;
   role: string;
@@ -41,6 +42,7 @@ interface AgentsProps {
 export function AgentsPage({ onNav }: AgentsProps) {
   const { config, backend, scannerStats, signals, positions, strategies } = useApp();
   const [c15, setC15] = useState<Crypto15mStatus | null>(null);
+  const [selected, setSelected] = useState<string | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -136,6 +138,11 @@ export function AgentsPage({ onNav }: AgentsProps) {
     return list;
   }, [config, scannerStats, signals, positions, c15, env, engineUp, tradingOn]);
 
+  const current = agents.find((a) => a.id === selected);
+  if (current) {
+    return <AgentDetail agent={current} c15={c15} onBack={() => setSelected(null)} onNav={onNav} />;
+  }
+
   const activeCount = agents.filter((a) => a.state === 'active' || a.state === 'watching').length;
   const totalOpen = agents.reduce((s, a) => s + a.openPositions, 0);
   const totalPnl = agents.reduce((s, a) => s + a.realizedPnl, 0);
@@ -171,7 +178,7 @@ export function AgentsPage({ onNav }: AgentsProps) {
 
       <div className="mt-6 grid gap-4 lg:grid-cols-3">
         {agents.map((a) => (
-          <AgentCard key={a.id} agent={a} onNav={onNav} />
+          <AgentCard key={a.id} agent={a} onOpen={() => setSelected(a.id)} onNav={onNav} />
         ))}
       </div>
 
@@ -285,9 +292,19 @@ export function AgentsPage({ onNav }: AgentsProps) {
   );
 }
 
-function AgentCard({ agent: a, onNav }: { agent: AgentView; onNav: (p: PageId) => void }) {
+function AgentCard({
+  agent: a, onOpen, onNav,
+}: { agent: AgentView; onOpen: () => void; onNav: (p: PageId) => void }) {
   const Icon = a.icon;
   return (
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={onOpen}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(); } }}
+      title={`See what ${a.name} is doing`}
+      className="group cursor-pointer rounded-xl transition-shadow hover:shadow-[0_0_0_1px_rgba(168,85,247,0.45)] focus:outline-none focus-visible:shadow-[0_0_0_1px_rgba(168,85,247,0.8)]"
+    >
     <Card>
       <div className="flex items-start gap-3">
         <div
@@ -345,17 +362,26 @@ function AgentCard({ agent: a, onNav }: { agent: AgentView; onNav: (p: PageId) =
         <Metric label="Last seen" value={fmtRelative(a.lastActivity)} />
       </div>
 
-      <button
-        onClick={() => onNav(a.configurePage)}
-        className="mt-4 flex w-full items-center justify-center gap-1 rounded-md border border-krypt-border py-1.5 text-xs text-krypt-muted hover:border-krypt-borderHi hover:text-white"
-      >
-        <Cpu className="h-3 w-3" /> Configure
-      </button>
+      <div className="mt-4 grid grid-cols-2 gap-2">
+        <button
+          onClick={(e) => { e.stopPropagation(); onOpen(); }}
+          className="flex items-center justify-center gap-1 rounded-md border border-krypt-purple/40 bg-krypt-purple/10 py-1.5 text-xs text-white hover:bg-krypt-purple/20"
+        >
+          View activity <ChevronRight className="h-3 w-3" />
+        </button>
+        <button
+          onClick={(e) => { e.stopPropagation(); onNav(a.configurePage); }}
+          className="flex items-center justify-center gap-1 rounded-md border border-krypt-border py-1.5 text-xs text-krypt-muted hover:border-krypt-borderHi hover:text-white"
+        >
+          <Cpu className="h-3 w-3" /> Configure
+        </button>
+      </div>
     </Card>
+    </div>
   );
 }
 
-function StatePill({ state, note }: { state: AgentState; note: string }) {
+export function StatePill({ state, note }: { state: AgentState; note: string }) {
   const tone = {
     active: 'border-krypt-win/40 bg-krypt-win/10 text-krypt-win',
     watching: 'border-krypt-indigo/40 bg-krypt-indigo/10 text-krypt-indigo',
@@ -389,7 +415,7 @@ function ConfidencePill({ t, n }: { t: number | null; n: number }) {
   );
 }
 
-function Metric({
+export function Metric({
   label, value, hint, tone,
 }: { label: string; value: string; hint?: string; tone?: 'good' | 'bad' }) {
   return (
@@ -414,7 +440,7 @@ function agentState(
   return { state: 'active', stateNote: 'scanning and trading' };
 }
 
-function isOpen(p: BotPosition): boolean {
+export function isOpen(p: BotPosition): boolean {
   return !p.resolved && (p.status === 'filled' || p.status === 'partial' || p.status === 'submitted');
 }
 
