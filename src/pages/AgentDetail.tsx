@@ -1,11 +1,17 @@
 import { useEffect, useState } from 'react';
-import { ArrowLeft, Cpu, Eye, Radio, ScrollText, Trophy, Wallet } from 'lucide-react';
+import {
+  AlertTriangle, ArrowLeft, Cpu, Eye, HelpCircle, Radio, ScrollText, Trophy, Wallet,
+} from 'lucide-react';
 import type {
   BotPosition, Crypto15mPosition, Crypto15mSnapshot, Crypto15mStatus, LogEntry, SignalRow,
+  TraderConfig,
 } from '@shared/types';
 import { useApp } from '../state/AppStateProvider';
 import { Card, Empty, Page } from '../components/common';
 import { cls, fmtCents, fmtRelative, fmtTimeShort, fmtUsd } from '../utils/format';
+import {
+  globalBlockers, SKIP_KIND_FIX, SKIP_KIND_LABEL, SkipKind, skipReason,
+} from '../utils/skipReasons';
 import type { PageId } from '../App';
 import { AgentView, Metric, StatePill, isOpen } from './Agents';
 
@@ -89,9 +95,10 @@ function doingNow(a: AgentView): string {
 }
 
 function ScannerActivity({ agent: a }: { agent: AgentView }) {
-  const { signals, positions, logs, config } = useApp();
+  const { signals, positions, logs, config, account } = useApp();
   const env = config?.kalshiEnv ?? 'demo';
   const feed = signals.filter((s) => s.source === a.id).slice(0, FEED_LIMIT);
+  const blockers = globalBlockers(config, account);
   const mine = positions.filter((p) => p.kalshiEnv === env && p.signalSource === a.id);
   const open = mine.filter(isOpen);
   const results = mine.filter((p) => p.resolved && p.status !== 'dry_run').slice(0, 15);
@@ -102,13 +109,15 @@ function ScannerActivity({ agent: a }: { agent: AgentView }) {
 
   return (
     <>
+      {config && <WhyNoBets feed={feed} cfg={config} blockers={blockers} />}
+
       <div className="mt-4 grid gap-4 lg:grid-cols-2">
         <Section icon={Radio} title="Live feed" hint="signals it found">
           {feed.length === 0 ? (
             <Empty title="No signals yet" description="New signals appear here as the agent finds them." />
           ) : (
             <div className="flex max-h-96 flex-col divide-y divide-krypt-border overflow-y-auto">
-              {feed.map((s) => <SignalLine key={s.id} s={s} />)}
+              {feed.map((s) => <SignalLine key={s.id} s={s} cfg={config} />)}
             </div>
           )}
         </Section>
@@ -302,15 +311,73 @@ function LogSection({ logs }: { logs: LogEntry[] }) {
   );
 }
 
-function SignalLine({ s }: { s: SignalRow }) {
+/** Plain-language summary of why recent signals did not become bets. */
+function WhyNoBets({
+  feed, cfg, blockers,
+}: { feed: SignalRow[]; cfg: TraderConfig; blockers: string[] }) {
+  const skipped = feed.filter((s) => !s.traded);
+  if (skipped.length === 0 && blockers.length === 0) return null;
+
+  const counts = new Map<SkipKind, number>();
+  for (const s of skipped) {
+    const k = skipReason(s, cfg).kind;
+    counts.set(k, (counts.get(k) ?? 0) + 1);
+  }
+  const ranked = Array.from(counts.entries()).sort((x, y) => y[1] - x[1]);
+
+  return (
+    <div className="mt-4">
+      <Section
+        icon={HelpCircle}
+        title="Why no bets?"
+        hint={`${skipped.length} of the last ${feed.length} signals skipped`}
+      >
+        {blockers.length > 0 && (
+          <div className="mb-3 flex flex-col gap-2">
+            {blockers.map((b) => (
+              <div
+                key={b}
+                className="flex items-start gap-2 rounded-lg border border-krypt-loss/30 bg-krypt-loss/5 p-2 text-xs text-krypt-loss"
+              >
+                <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                <span>{b}</span>
+              </div>
+            ))}
+          </div>
+        )}
+        {ranked.length > 0 && (
+          <div className="flex flex-col divide-y divide-krypt-border text-xs">
+            {ranked.map(([kind, n]) => (
+              <div key={kind} className="flex items-start gap-3 py-2">
+                <span className="w-10 shrink-0 text-right font-mono text-white">{n}×</span>
+                <div className="flex-1">
+                  <div className="text-white">{SKIP_KIND_LABEL[kind]}</div>
+                  <div className="text-krypt-muted">{SKIP_KIND_FIX[kind]}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        <p className="mt-3 text-[11px] leading-relaxed text-krypt-dim">
+          Skipping most signals is normal: the rules exist to filter out weak bets. Loosening them means
+          more bets, but lower-quality ones. Try changes on Demo first.
+        </p>
+      </Section>
+    </div>
+  );
+}
+
+function SignalLine({ s, cfg }: { s: SignalRow; cfg: TraderConfig | null }) {
+  const why = !s.traded && cfg ? skipReason(s, cfg) : null;
   return (
     <div className="flex items-center gap-3 py-2 text-xs">
       <span className="w-14 shrink-0 text-krypt-dim">{fmtRelative(s.createdAt)}</span>
       <div className="min-w-0 flex-1">
         <div className="truncate text-white">{s.title}</div>
         <div className="font-mono text-[10px] text-krypt-muted">
-          {s.ticker} · conf {s.confidence.toFixed(0)} · edge +{s.edgePts.toFixed(1)}
+          {s.ticker} · conf {s.confidence.toFixed(0)} · edge {s.edgePts >= 0 ? '+' : ''}{s.edgePts.toFixed(1)}
         </div>
+        {why && <div className="text-[10px] text-krypt-warn">why skipped: {why.text}</div>}
       </div>
       <span className={cls('font-mono', s.direction === 'yes' ? 'text-krypt-win' : 'text-krypt-loss')}>
         {s.direction.toUpperCase()} {s.priceCents}¢
