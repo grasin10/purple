@@ -8,6 +8,38 @@ const merge = (over: Partial<TraderConfig>): TraderConfig => ({
 
 export const BUILTIN_STRATEGIES: StrategyPreset[] = [
   {
+    id: 'krypt-small-account',
+    name: 'Small Account Starter',
+    tagline: 'More trades for a small balance, with tight $1 risk limits.',
+    description:
+      "Built for accounts under about $50. Starts from Edge Stack's sources (whales + contrarian sports momentum) but loosens the filters for more trades: whales in every category except sports (sports whales backtested negative), confidence ≥ 50 / edge ≥ 3 for whales, confidence ≥ 35 / edge ≥ 3 for momentum, entry 10-90¢. Every bet is a flat $1, at most 4 open at once (the engine stops betting when cash drops under $5), at most 15 new bets a day, and trading stops for the day after a $3 loss. NOT backtested: looser filters mean more but weaker bets, so expect a lower win rate than Edge Stack.",
+    riskLabel: 'aggressive',
+    badge: 'new',
+    backtest: null,
+    config: merge({
+      tradeWhales: true,
+      tradeMomentum: true,
+      contrarianOnly: true,
+      allowedCategories: null,
+      allowedWhaleCategories: ['crypto', 'exotics', 'entertainment', 'economics', 'politics', 'world', 'climate'],
+      allowedMomentumCategories: ['sports'],
+      allowedMomentumSignalTypes: ['trade_cluster'],
+      minConfidenceWhale: 50.0,
+      minEdgePtsWhale: 3.0,
+      minConfidenceMomentum: 35.0,
+      minEdgePtsMomentum: 3.0,
+      minEntryPriceCents: 10,
+      maxEntryPriceCents: 90,
+      sizingMode: 'fixed',
+      fixedTradeUsd: 1,
+      hardMaxPositionUsd: 1,
+      maxOpenPositions: 4,
+      maxPositionsPerEvent: 1,
+      maxDailyNewPositions: 15,
+      stopLossOnDay: -3,
+    }),
+  },
+  {
     id: 'krypt-edge',
     name: 'Edge Stack',
     tagline: 'Both backtested edges at once — crypto whales + sports momentum.',
