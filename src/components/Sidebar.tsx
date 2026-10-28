@@ -1,5 +1,5 @@
 import {
-  Activity, BarChart3, Bitcoin, BookOpen, Briefcase, FileText, Folder, Info, KeyRound,
+  Activity, BarChart3, Bitcoin, BookOpen, Bot, Briefcase, FileText, Folder, Info, KeyRound,
   LayoutDashboard, ListChecks, Orbit, Settings, Sparkles, Wallet,
 } from 'lucide-react';
 import { useApp } from '../state/AppStateProvider';
@@ -8,6 +8,7 @@ import type { PageId } from '../App';
 
 const NAV: { id: PageId; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+  { id: 'agents', label: 'Agents', icon: Bot },
   { id: 'strategies', label: 'Strategies', icon: Sparkles },
   { id: 'positions', label: 'Positions', icon: Briefcase },
   { id: 'signals', label: 'Signals', icon: Activity },
