@@ -19,6 +19,7 @@ from .briefing import LABEL, build_briefing, build_evening_review, lead_line
 from .config import BusinessProfile, Settings, validate
 from .crm import service as crm
 from .db import Database
+from .integrations import krypt
 from .integrations.base import integration_statuses
 from .models import Draft, InboundMessage, Lead, LeadStage
 
@@ -52,6 +53,12 @@ Business
 /sent <id> - record that you sent an approved draft yourself
 /review - messages that need your judgment
 /resolve <id> - mark a review item handled
+
+Trading (Krypt Trader, read-only)
+/krypt - mode, balance, open positions, today's and this week's P&L
+/trades - last 10 positions
+/backtest - fee-aware backtest of whale/momentum signals
+/backtest c15 - backtest the 15-minute crypto strategy
 
 System
 /status - integration health
@@ -275,6 +282,31 @@ def _cmd_marketing(ctx, s, args):
             "can use your real business details.")
 
 
+def _krypt_db(ctx: Context):
+    return krypt.resolve_db_path(ctx.settings.krypt_db_path)
+
+
+def _krypt_call(ctx: Context, fn) -> str:
+    try:
+        return fn(_krypt_db(ctx))
+    except krypt.KryptUnavailable as exc:
+        return (f"Krypt Trader isn't reachable: {exc}.\n"
+                "Open the Krypt Trader app at least once on this computer, or set KRYPT_TRADER_DB in .env.")
+
+
+def _cmd_krypt(ctx, s, args):
+    return _krypt_call(ctx, lambda p: krypt.format_status(krypt.snapshot(p)))
+
+
+def _cmd_trades(ctx, s, args):
+    return _krypt_call(ctx, krypt.recent_trades)
+
+
+def _cmd_backtest(ctx, s, args):
+    c15 = bool(re.search(r"\b(c15|15|crypto)\b", args, re.I))
+    return _krypt_call(ctx, lambda p: krypt.run_backtest(p, ctx.settings.krypt_src_dir, crypto15m=c15))
+
+
 COMMANDS: dict[str, Callable[[Context, Session, str], str]] = {
     "start": _cmd_start, "help": _cmd_help, "briefing": _cmd_briefing, "evening": _cmd_evening,
     "leads": _cmd_leads, "junk": _cmd_junk, "cleaning": _cmd_cleaning, "followups": _cmd_followups,
@@ -282,10 +314,15 @@ COMMANDS: dict[str, Callable[[Context, Session, str], str]] = {
     "drafts": _cmd_drafts, "draft": _cmd_draft, "approve": _cmd_approve, "reject": _cmd_reject,
     "sent": _cmd_sent, "review": _cmd_review, "resolve": _cmd_resolve, "status": _cmd_status,
     "settings": _cmd_settings, "marketing": _cmd_marketing,
+    "krypt": _cmd_krypt, "trades": _cmd_trades, "backtest": _cmd_backtest,
 }
 
 # Natural-language intents, checked in order. Each maps to (command, args).
 NL_INTENTS: list[tuple[re.Pattern, str, str]] = [
+    (re.compile(r"\bback[\s-]?test\w*\b.*\b(15|crypto)\b", re.I), "backtest", "c15"),
+    (re.compile(r"\bback[\s-]?test\w*\b|\b(is|are) (?:my|the) (?:strateg\w+|signals?|bot) (?:profitable|making money)", re.I), "backtest", ""),
+    (re.compile(r"\b(recent|last|latest) (?:\d+ )?(trades|positions)\b", re.I), "trades", ""),
+    (re.compile(r"\b(krypt|trading|trader|p&l|pnl|profit|positions?|kalshi)\b", re.I), "krypt", ""),
     (re.compile(r"\b(integrations?|connected|health|status)\b", re.I), "status", ""),
     (re.compile(r"\bsettings?|config", re.I), "settings", ""),
     (re.compile(r"\b(evening|end of day|wrap[\s-]?up|summari[sz]e .*today)\b", re.I), "evening", ""),

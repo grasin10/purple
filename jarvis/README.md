@@ -2,7 +2,7 @@
 
 JARVIS is a private assistant for a **junk removal + home cleaning** business that you control from **Telegram** on your phone and from a **mobile-friendly web dashboard**. Version 0.1 handles leads. It sorts incoming messages, keeps a CRM, drafts replies for your approval, tracks follow-ups and sends you daily briefings. It also keeps an audit log of everything it does.
 
-> It lives in `jarvis/`, separate from the Krypt Trader app in the rest of this repository, and shares no code or data with it.
+> It lives in `jarvis/`, separate from the Krypt Trader app in the rest of this repository. The only link is a read-only view of Krypt Trader's database (see [Krypt Trader link](#krypt-trader-link)).
 
 ## What actually works today (v0.1)
 
@@ -19,6 +19,7 @@ JARVIS is a private assistant for a **junk removal + home cleaning** business th
 | Dashboard | ✅ working, tested | password login, signed cookie, CSRF, security headers, command box using the same router as Telegram |
 | Audit log | ✅ working | phone numbers and emails are redacted; searchable in the dashboard |
 | Config validation / health / backup | ✅ working | never prints secrets |
+| Krypt Trader link | ✅ working, tested | **read-only**: `/krypt` status and P&L, `/trades`, `/backtest`, win/loss/error alerts, trading section in briefings. Cannot place trades or change settings |
 | Email (Gmail) | ⏳ interface only | Phase 3, needs Google OAuth credentials |
 | Automatic replies | 🚫 not implemented | the flag exists but stays off; nothing can be sent to customers automatically |
 | Marketing, YouTube, sports, forex | ⏳ not started | `/marketing` says so plainly and does not pretend |
@@ -139,11 +140,28 @@ Or from the terminal:
 
 ## Commands
 
-`/briefing` `/evening` `/leads [search]` `/junk` `/cleaning` `/followups` `/unanswered` `/lead <id>` `/stage <id> <STAGE>` `/inquiry <message>` `/drafts` `/draft <id>` `/approve <id>` `/reject <id>` `/sent <id>` `/review` `/resolve <id>` `/status` `/settings` `/marketing` `/help`
+`/krypt` `/trades` `/backtest` `/backtest c15` `/briefing` `/evening` `/leads [search]` `/junk` `/cleaning` `/followups` `/unanswered` `/lead <id>` `/stage <id> <STAGE>` `/inquiry <message>` `/drafts` `/draft <id>` `/approve <id>` `/reject <id>` `/sent <id>` `/review` `/resolve <id>` `/status` `/settings` `/marketing` `/help`
 
 Natural language works too, for example "JARVIS, find cleaning leads that haven't received a reply" or "show me which integrations aren't connected".
 
 Lead stages: `NEW → QUALIFYING → NEEDS_INFORMATION → READY_FOR_QUOTE → QUOTE_PENDING_APPROVAL → QUOTE_SENT → FOLLOW_UP → BOOKED → COMPLETED → CLOSED`
+
+## Krypt Trader link
+
+If Krypt Trader is installed on the same computer, JARVIS finds its database automatically (`%APPDATA%\Krypt Trader\data\krypt-trader.db` on Windows). Set `KRYPT_TRADER_DB` in `.env` if it lives elsewhere. `jarvis ask /status` shows whether it was found.
+
+| Command | What you get |
+|---|---|
+| `/krypt` | demo or live, auto-trading on/off, engine running, balance, open positions, today's and 7-day P&L |
+| `/trades` | the last 10 positions and how they ended |
+| `/backtest` | Krypt's own fee-aware backtest of whale and momentum signals, in plain English |
+| `/backtest c15` | the same for the 15-minute crypto strategy |
+
+Natural language works too: "how is my trading doing?", "show my last trades", "is my strategy profitable?".
+
+The bot also messages you when a position **wins, loses or hits an order error** (checked every minute; set `JARVIS_KRYPT_ALERTS=false` to stop). The first check after start-up only records where Krypt is, so old trades never flood you. Briefings and evening reviews gain a short trading section.
+
+**JARVIS can look, never touch.** The database is opened in SQLite read-only mode and only the non-secret switches (`kalshiEnv`, `enableTrading`, 15-minute crypto on/live) are read from `settings.json`. Starting, stopping, going live or changing strategy happens only in the Krypt Trader app on your computer. Backtest replies always carry the same warning as the day-trader skill: in-sample results on small samples are "worth paper-testing", not proof, and not financial advice.
 
 ## How messages are handled
 

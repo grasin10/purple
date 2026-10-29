@@ -10,6 +10,7 @@ from .classify import Category
 from .config import Settings
 from .crm import service as crm
 from .db import utcnow
+from .integrations import krypt
 from .integrations.base import IntegrationState, integration_statuses
 from .models import AuditLog, Draft, DraftStatus, InboundMessage, Lead, LeadStage
 
@@ -64,6 +65,7 @@ def build_briefing(session: Session, settings: Settings) -> str:
                     if s.state not in (IntegrationState.CONNECTED, IntegrationState.CONFIGURED) and s.phase in ("1", "3")]
     if disconnected:
         out.append("Not connected: " + ", ".join(disconnected))
+    out += _trading_section(settings)
 
     out += ["", "Recommended priorities:"]
     prios = []
@@ -81,6 +83,14 @@ def build_briefing(session: Session, settings: Settings) -> str:
         prios.append("No open lead work recorded. Lead volume is the bottleneck - marketing (Phase 4) is next.")
     out.extend(f"{i}. {p}" for i, p in enumerate(prios[:5], 1))
     return "\n".join(out)
+
+
+def _trading_section(settings: Settings) -> list[str]:
+    """Krypt Trader summary, or nothing if the app isn't installed here."""
+    try:
+        return [""] + krypt.briefing_lines(krypt.snapshot(krypt.resolve_db_path(settings.krypt_db_path)))
+    except krypt.KryptUnavailable:
+        return []
 
 
 def build_evening_review(session: Session, settings: Settings) -> str:
@@ -107,4 +117,5 @@ def build_evening_review(session: Session, settings: Settings) -> str:
     due = crm.followups_due(session, now=tomorrow)
     lines.append(f"Follow-ups due by tomorrow: {len(due)}")
     lines.extend("  " + lead_line(x) for x in due[:8])
+    lines += _trading_section(settings)
     return "\n".join(lines)
