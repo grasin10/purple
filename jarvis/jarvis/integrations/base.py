@@ -8,6 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from ..config import TELEGRAM_TOKEN_RE, Settings
+from . import krypt
 
 
 class IntegrationState:
@@ -29,11 +30,17 @@ class IntegrationStatus:
 def integration_statuses(settings: Settings, live: dict[str, IntegrationStatus] | None = None) -> list[IntegrationStatus]:
     live = live or {}
     tg_state = IntegrationState.CONFIGURED if TELEGRAM_TOKEN_RE.match(settings.telegram_bot_token or "") else IntegrationState.NOT_CONFIGURED
+    krypt_db = krypt.resolve_db_path(settings.krypt_db_path)
     statuses = [
         live.get("telegram") or IntegrationStatus(
             "Telegram bot", tg_state,
             "token present (run `jarvis health --online` to verify)" if tg_state == IntegrationState.CONFIGURED else "set TELEGRAM_BOT_TOKEN",
             "1"),
+        IntegrationStatus(
+            "Krypt Trader (read-only)",
+            IntegrationState.CONFIGURED if krypt_db.is_file() else IntegrationState.NOT_CONFIGURED,
+            f"reading {krypt_db}" if krypt_db.is_file() else "database not found - open Krypt Trader once or set KRYPT_TRADER_DB",
+            "trading"),
         IntegrationStatus("Business email (Gmail)", IntegrationState.NOT_IMPLEMENTED, "adapter interface only; Gmail OAuth is Phase 3", "3"),
         IntegrationStatus("Outbound customer messaging", IntegrationState.NOT_IMPLEMENTED, "draft-only: approved replies are copied/sent by you", "3"),
         IntegrationStatus("Calendar", IntegrationState.NOT_IMPLEMENTED, "not started", "later"),

@@ -75,6 +75,10 @@ class Settings:
     # Email (Gmail OAuth) - file paths only, never passwords.
     gmail_client_secrets_file: str = ""
     gmail_token_file: str = ""
+    # Krypt Trader (read-only). Empty path = auto-detect the app's data folder.
+    krypt_db_path: str = ""
+    krypt_src_dir: Path = PROJECT_ROOT.parent / "python"
+    krypt_alerts: bool = True
 
     @classmethod
     def from_env(cls, load_env_file: bool = True) -> "Settings":
@@ -102,6 +106,9 @@ class Settings:
             backup_dir=Path(e("JARVIS_BACKUP_DIR") or PROJECT_ROOT / "backups"),
             gmail_client_secrets_file=e("GMAIL_CLIENT_SECRETS_FILE", ""),
             gmail_token_file=e("GMAIL_TOKEN_FILE", ""),
+            krypt_db_path=e("KRYPT_TRADER_DB", ""),
+            krypt_src_dir=Path(e("KRYPT_TRADER_SRC") or PROJECT_ROOT.parent / "python"),
+            krypt_alerts=_bool(e("JARVIS_KRYPT_ALERTS"), True),
         )
 
     def secret_values(self) -> list[str]:

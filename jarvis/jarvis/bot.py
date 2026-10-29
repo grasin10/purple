@@ -8,6 +8,7 @@ from . import audit
 from .briefing import build_briefing, build_evening_review
 from .config import BusinessProfile, Settings
 from .db import Database
+from .integrations import krypt
 from .integrations.telegram import TelegramClient, TelegramError
 from .models import KeyValue
 from .router import Context, handle
@@ -17,6 +18,8 @@ from .security import RateLimiter, is_authorized_telegram_user
 log = logging.getLogger(__name__)
 
 OFFSET_KEY = "telegram.update_offset"
+KRYPT_WATERMARK_KEY = "krypt.alert_watermark"
+KRYPT_CHECK_SECONDS = 60
 UNAUTHORIZED_REPLY = "This is a private assistant. You are not authorized to use it."
 
 
@@ -30,18 +33,48 @@ class Bot:
         self.unauth_limiter = RateLimiter(1, window_seconds=3600)  # at most one refusal per stranger per hour
 
     # --- persistence of the polling offset (prevents reprocessing after restart)
-    def _load_offset(self) -> int | None:
+    def _get_kv(self, key: str) -> str | None:
         with self.db.session() as s:
-            row = s.get(KeyValue, OFFSET_KEY)
-            return int(row.value) if row and row.value else None
+            row = s.get(KeyValue, key)
+            return row.value if row and row.value else None
+
+    def _set_kv(self, key: str, value: str) -> None:
+        with self.db.session() as s:
+            row = s.get(KeyValue, key)
+            if row:
+                row.value = value
+            else:
+                s.add(KeyValue(key=key, value=value))
+
+    def _load_offset(self) -> int | None:
+        raw = self._get_kv(OFFSET_KEY)
+        return int(raw) if raw else None
 
     def _save_offset(self, offset: int) -> None:
-        with self.db.session() as s:
-            row = s.get(KeyValue, OFFSET_KEY)
-            if row:
-                row.value = str(offset)
-            else:
-                s.add(KeyValue(key=OFFSET_KEY, value=str(offset)))
+        self._set_kv(OFFSET_KEY, str(offset))
+
+    def check_krypt_alerts(self) -> list[str]:
+        """Notify the owner about Krypt Trader positions settled or errored since the last check.
+
+        The first check only records where Krypt currently is, so starting the bot
+        never floods you with old trades. Returns the messages sent.
+        """
+        if not self.settings.krypt_alerts:
+            return []
+        path = krypt.resolve_db_path(self.settings.krypt_db_path)
+        try:
+            wm = krypt.Watermark.loads(self._get_kv(KRYPT_WATERMARK_KEY))
+            if wm is None:
+                self._set_kv(KRYPT_WATERMARK_KEY, krypt.current_watermark(path).dumps())
+                return []
+            msgs, new_wm = krypt.new_alerts(path, wm)
+        except krypt.KryptUnavailable:
+            return []
+        if new_wm != wm:
+            self._set_kv(KRYPT_WATERMARK_KEY, new_wm.dumps())
+        if msgs:
+            self.notify_owner("\n".join(msgs))
+        return msgs
 
     def process_update(self, update: dict) -> str | None:
         """Handle one Telegram update. Returns the reply text sent (or None)."""
@@ -108,9 +141,16 @@ class Bot:
         log.info("JARVIS bot polling; %d scheduled job(s)", len(jobs))
         offset = self._load_offset()
         backoff = 1.0
+        next_krypt_check = 0.0
         while True:
             if jobs:
                 run_due_jobs(self.db, jobs, self.settings.timezone)
+            if time.monotonic() >= next_krypt_check:
+                next_krypt_check = time.monotonic() + KRYPT_CHECK_SECONDS
+                try:
+                    self.check_krypt_alerts()
+                except Exception:
+                    log.exception("Krypt alert check failed")
             try:
                 updates = self.client.get_updates(offset, poll_timeout=poll_timeout)
                 backoff = 1.0
